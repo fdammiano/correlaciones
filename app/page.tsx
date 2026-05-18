@@ -7,45 +7,81 @@ import type { SeriesData } from "@/lib/types";
 
 const STORAGE_KEY = "correlations-app:series:v1";
 
+function normalize(parsed: SeriesData[]): SeriesData[] {
+  return parsed.map((s) => ({ ...s, active: s.active !== false }));
+}
+
 export default function Home() {
   const [series, setSeries] = useState<SeriesData[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const [serverConfigured, setServerConfigured] = useState(false);
 
+  // hydrate: prefer server (shared), fall back to localStorage (per-browser)
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          const normalized = (parsed as SeriesData[]).map((s) => ({
-            ...s,
-            active: s.active !== false,
-          }));
-          setSeries(normalized);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/universe", { cache: "no-store" });
+        if (res.ok) {
+          const data = await res.json();
+          if (cancelled) return;
+          if (data?.configured) {
+            setServerConfigured(true);
+            if (Array.isArray(data.universe) && data.universe.length > 0) {
+              setSeries(normalize(data.universe as SeriesData[]));
+              setHydrated(true);
+              return;
+            }
+          }
         }
+      } catch {
+        // server not reachable — fall through to local
       }
-    } catch {
-      // ignore corrupted storage
-    }
-    setHydrated(true);
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) setSeries(normalize(parsed as SeriesData[]));
+        }
+      } catch {
+        // corrupted local storage
+      }
+      if (!cancelled) setHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
+  // persist locally on every change (cache + offline fallback)
   useEffect(() => {
     if (!hydrated) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(series));
-    } catch (err) {
-      // QuotaExceeded — fall back to keeping only custom (hand-pasted) series,
-      // since Ken French and Yahoo data can be re-fetched.
+    } catch {
       try {
         const customOnly = series.filter((s) => s.source === "custom");
         localStorage.setItem(STORAGE_KEY, JSON.stringify(customOnly));
-        console.warn("localStorage lleno: solo se guardan series pegadas a mano.");
       } catch {
-        console.warn("localStorage lleno y no se pudo guardar.");
+        // give up silently
       }
     }
   }, [series, hydrated]);
+
+  // sync to server, debounced
+  useEffect(() => {
+    if (!hydrated || !serverConfigured) return;
+    const t = setTimeout(() => {
+      fetch("/api/universe", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ universe: series }),
+      }).catch(() => {
+        // network blip — local cache still has it; will retry next change
+      });
+    }, 1200);
+    return () => clearTimeout(t);
+  }, [series, hydrated, serverConfigured]);
 
   function add(newOnes: SeriesData[]) {
     setSeries((prev) => {
@@ -80,6 +116,13 @@ export default function Home() {
         onClear={() => setSeries([])}
         onToggleActive={toggleActive}
         onSetAllActive={setAllActive}
+        storageBadge={
+          hydrated
+            ? serverConfigured
+              ? "compartido"
+              : "solo local"
+            : "..."
+        }
       />
       <ChartPanel series={activeSeries} />
     </main>

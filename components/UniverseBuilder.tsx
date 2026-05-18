@@ -176,6 +176,7 @@ type Props = {
   onClear: () => void;
   onToggleActive: (id: string) => void;
   onSetAllActive: (active: boolean) => void;
+  storageBadge?: string;
 };
 
 export default function UniverseBuilder({
@@ -185,6 +186,7 @@ export default function UniverseBuilder({
   onClear,
   onToggleActive,
   onSetAllActive,
+  storageBadge,
 }: Props) {
   const [tab, setTab] = useState<"french" | "yahoo" | "paste">("french");
   const [pasteName, setPasteName] = useState("SPY");
@@ -317,7 +319,29 @@ export default function UniverseBuilder({
 
   return (
     <aside className="w-80 shrink-0 border-r border-zinc-200 bg-zinc-50 p-4 overflow-y-auto h-screen sticky top-0">
-      <h2 className="text-base font-semibold mb-3">Universo</h2>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-base font-semibold">Universo</h2>
+        {storageBadge && (
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded ${
+              storageBadge === "compartido"
+                ? "bg-emerald-100 text-emerald-800"
+                : storageBadge === "solo local"
+                ? "bg-amber-100 text-amber-800"
+                : "bg-zinc-100 text-zinc-500"
+            }`}
+            title={
+              storageBadge === "compartido"
+                ? "Las series se sincronizan con el server — todos los visitantes ven lo mismo."
+                : storageBadge === "solo local"
+                ? "Las series solo se guardan en este browser. Activá Upstash Redis en Vercel para compartir."
+                : ""
+            }
+          >
+            {storageBadge}
+          </span>
+        )}
+      </div>
 
       <div className="flex border-b border-zinc-200 mb-3 text-sm">
         <button
