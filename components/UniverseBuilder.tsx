@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { FrenchDatasetMeta, SeriesData, Region, Family, ReturnPoint } from "@/lib/types";
+import { downloadAllSeriesCSV, downloadSeriesCSV } from "@/lib/download";
 
 function monthEndISO(y: number, m: number): string {
   const last = new Date(Date.UTC(y, m, 0));
@@ -407,20 +408,35 @@ export default function UniverseBuilder({ series, onAdd, onRemove, onClear }: Pr
         {series.length === 0 ? (
           <p className="text-xs text-zinc-500">Vacío — agregá series arriba.</p>
         ) : (
-          <ul className="space-y-1">
-            {series.map((s) => (
-              <li key={s.id} className="flex items-start gap-2 text-xs">
-                <button
-                  onClick={() => onRemove(s.id)}
-                  className="text-zinc-400 hover:text-red-600 mt-0.5"
-                  title="Quitar"
-                >
-                  ✕
-                </button>
-                <span className="flex-1 break-words">{s.name}</span>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="space-y-1">
+              {series.map((s) => (
+                <li key={s.id} className="flex items-start gap-2 text-xs">
+                  <button
+                    onClick={() => onRemove(s.id)}
+                    className="text-zinc-400 hover:text-red-600 mt-0.5"
+                    title="Quitar"
+                  >
+                    ✕
+                  </button>
+                  <button
+                    onClick={() => downloadSeriesCSV(s)}
+                    className="text-zinc-400 hover:text-zinc-900 mt-0.5"
+                    title="Descargar CSV de esta serie"
+                  >
+                    ⬇
+                  </button>
+                  <span className="flex-1 break-words">{s.name}</span>
+                </li>
+              ))}
+            </ul>
+            <button
+              onClick={() => downloadAllSeriesCSV(series)}
+              className="mt-3 w-full bg-zinc-100 hover:bg-zinc-200 text-zinc-900 text-xs py-1.5 rounded border border-zinc-300"
+            >
+              ⬇ Descargar todas combinadas (CSV)
+            </button>
+          </>
         )}
       </div>
     </aside>
