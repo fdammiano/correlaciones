@@ -5,6 +5,7 @@ export type SeriesData = {
   name: string;
   source: "french" | "yahoo" | "custom";
   returns: ReturnPoint[];
+  active?: boolean;
 };
 
 export type FrenchDatasetMeta = {

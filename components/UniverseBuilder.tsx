@@ -147,9 +147,18 @@ type Props = {
   onAdd: (s: SeriesData[]) => void;
   onRemove: (id: string) => void;
   onClear: () => void;
+  onToggleActive: (id: string) => void;
+  onSetAllActive: (active: boolean) => void;
 };
 
-export default function UniverseBuilder({ series, onAdd, onRemove, onClear }: Props) {
+export default function UniverseBuilder({
+  series,
+  onAdd,
+  onRemove,
+  onClear,
+  onToggleActive,
+  onSetAllActive,
+}: Props) {
   const [tab, setTab] = useState<"french" | "yahoo" | "paste">("french");
   const [pasteName, setPasteName] = useState("SPY");
   const [pasteKind, setPasteKind] = useState<"returns_dec" | "returns_pct" | "prices">("prices");
@@ -463,44 +472,79 @@ export default function UniverseBuilder({ series, onAdd, onRemove, onClear }: Pr
       )}
 
       <div className="mt-5 pt-4 border-t border-zinc-200">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold">Series ({series.length})</h3>
-          {series.length > 0 && (
-            <button onClick={onClear} className="text-xs text-zinc-500 hover:text-red-600">
-              Limpiar
-            </button>
-          )}
-        </div>
+        {(() => {
+          const activeCount = series.filter((s) => s.active !== false).length;
+          return (
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-semibold">
+                Biblioteca ({activeCount}/{series.length})
+              </h3>
+              {series.length > 0 && (
+                <button onClick={onClear} className="text-xs text-zinc-500 hover:text-red-600">
+                  Borrar todo
+                </button>
+              )}
+            </div>
+          );
+        })()}
         {series.length === 0 ? (
           <p className="text-xs text-zinc-500">Vacío — agregá series arriba.</p>
         ) : (
           <>
+            <div className="flex gap-2 mb-2 text-[11px]">
+              <button
+                onClick={() => onSetAllActive(true)}
+                className="text-zinc-600 hover:text-zinc-900 underline"
+              >
+                Activar todas
+              </button>
+              <span className="text-zinc-300">·</span>
+              <button
+                onClick={() => onSetAllActive(false)}
+                className="text-zinc-600 hover:text-zinc-900 underline"
+              >
+                Desactivar todas
+              </button>
+            </div>
             <ul className="space-y-1">
-              {series.map((s) => (
-                <li key={s.id} className="flex items-start gap-2 text-xs">
-                  <button
-                    onClick={() => onRemove(s.id)}
-                    className="text-zinc-400 hover:text-red-600 mt-0.5"
-                    title="Quitar"
-                  >
-                    ✕
-                  </button>
-                  <button
-                    onClick={() => downloadSeriesCSV(s)}
-                    className="text-zinc-400 hover:text-zinc-900 mt-0.5"
-                    title="Descargar CSV de esta serie"
-                  >
-                    ⬇
-                  </button>
-                  <span className="flex-1 break-words">{s.name}</span>
-                </li>
-              ))}
+              {series.map((s) => {
+                const isActive = s.active !== false;
+                return (
+                  <li key={s.id} className="flex items-start gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={isActive}
+                      onChange={() => onToggleActive(s.id)}
+                      className="mt-0.5"
+                      title="Incluir en el análisis"
+                    />
+                    <button
+                      onClick={() => downloadSeriesCSV(s)}
+                      className="text-zinc-400 hover:text-zinc-900 mt-0.5"
+                      title="Descargar CSV"
+                    >
+                      ⬇
+                    </button>
+                    <button
+                      onClick={() => onRemove(s.id)}
+                      className="text-zinc-400 hover:text-red-600 mt-0.5"
+                      title="Borrar de la biblioteca"
+                    >
+                      ✕
+                    </button>
+                    <span className={`flex-1 break-words ${isActive ? "" : "text-zinc-400"}`}>
+                      {s.name}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
             <button
-              onClick={() => downloadAllSeriesCSV(series)}
-              className="mt-3 w-full bg-zinc-100 hover:bg-zinc-200 text-zinc-900 text-xs py-1.5 rounded border border-zinc-300"
+              onClick={() => downloadAllSeriesCSV(series.filter((s) => s.active !== false))}
+              disabled={series.filter((s) => s.active !== false).length === 0}
+              className="mt-3 w-full bg-zinc-100 hover:bg-zinc-200 text-zinc-900 text-xs py-1.5 rounded border border-zinc-300 disabled:opacity-40"
             >
-              ⬇ Descargar todas combinadas (CSV)
+              ⬇ Descargar activas combinadas (CSV)
             </button>
           </>
         )}
