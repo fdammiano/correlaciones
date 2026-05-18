@@ -188,7 +188,7 @@ export default function UniverseBuilder({
   onSetAllActive,
   storageBadge,
 }: Props) {
-  const [tab, setTab] = useState<"french" | "yahoo" | "paste">("french");
+  const [tab, setTab] = useState<"french" | "paste">("french");
   const [pasteName, setPasteName] = useState("SPY");
   const [pasteKind, setPasteKind] = useState<"returns_dec" | "returns_pct" | "prices">("prices");
   const [pasteText, setPasteText] = useState("");
@@ -200,7 +200,6 @@ export default function UniverseBuilder({
   const [columns, setColumns] = useState<string[]>([]);
   const [selectedCols, setSelectedCols] = useState<string[]>([]);
   const [loadingDs, setLoadingDs] = useState(false);
-  const [tickerInput, setTickerInput] = useState("SPY, ^DJI, ^GSPC");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -280,37 +279,6 @@ export default function UniverseBuilder({
     }
   }
 
-  async function addTickers() {
-    const tickers = tickerInput.split(",").map((t) => t.trim()).filter(Boolean);
-    if (tickers.length === 0) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const results = await Promise.all(
-        tickers.map(async (t) => {
-          const res = await fetch(`/api/yahoo?ticker=${encodeURIComponent(t)}`);
-          if (!res.ok) {
-            const msg = (await res.json()).error || res.statusText;
-            throw new Error(`${t}: ${msg}`);
-          }
-          const data = await res.json();
-          const returns = (data.returns ?? []) as { date: string; value: number }[];
-          return {
-            id: `yf::${t}`,
-            name: t,
-            source: "yahoo" as const,
-            returns,
-          };
-        }),
-      );
-      onAdd(results.filter((r) => r.returns.length > 0));
-    } catch (e: any) {
-      setError(e.message ?? "Error con tickers");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   function toggleCol(c: string) {
     setSelectedCols((prev) =>
       prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
@@ -349,12 +317,6 @@ export default function UniverseBuilder({
           onClick={() => setTab("french")}
         >
           Ken French
-        </button>
-        <button
-          className={`px-3 py-1.5 ${tab === "yahoo" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
-          onClick={() => setTab("yahoo")}
-        >
-          Yahoo
         </button>
         <button
           className={`px-3 py-1.5 ${tab === "paste" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
@@ -428,31 +390,6 @@ export default function UniverseBuilder({
             className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded disabled:opacity-40"
           >
             {busy ? "Agregando…" : "Agregar al universo"}
-          </button>
-        </div>
-      )}
-
-      {tab === "yahoo" && (
-        <div className="space-y-3 text-sm">
-          <div>
-            <label className="block text-xs text-zinc-600 mb-1">Tickers (coma)</label>
-            <textarea
-              rows={3}
-              value={tickerInput}
-              onChange={(e) => setTickerInput(e.target.value)}
-              className="w-full border border-zinc-300 rounded px-2 py-1 bg-white text-xs"
-              placeholder="SPY, ^DJI, ^GSPC, EEM"
-            />
-            <p className="text-[11px] text-zinc-500 mt-1">
-              Ej: SPY, QQQ, ^GSPC, ^DJI, ^STOXX50E, EEM, EWZ
-            </p>
-          </div>
-          <button
-            disabled={busy}
-            onClick={addTickers}
-            className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded disabled:opacity-40"
-          >
-            {busy ? "Bajando…" : "Agregar tickers"}
           </button>
         </div>
       )}
