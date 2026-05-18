@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import PlotlyChart from "./PlotlyChart";
 import { alignSeries, correlation, correlationMatrix, rollingCorrelation } from "@/lib/stats";
+import { cumulativeWealth, summarize } from "@/lib/metrics";
 import type { SeriesData } from "@/lib/types";
 
 type Mode = "one-vs-many" | "pair" | "matrix";
@@ -110,6 +111,26 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
         <MatrixView series={series} lastN={matrixLastN} />
       )}
 
+      {series.length > 0 && (
+        <>
+          <div className="mt-8">
+            <h2 className="text-sm font-semibold mb-2">Series individuales (base 100)</h2>
+            <p className="text-[11px] text-zinc-500 mb-2">
+              Crecimiento acumulado de cada serie normalizado a 100 en el primer mes disponible.
+            </p>
+            <WealthChart series={series} />
+          </div>
+
+          <div className="mt-8">
+            <h2 className="text-sm font-semibold mb-2">Métricas resumen</h2>
+            <p className="text-[11px] text-zinc-500 mb-2">
+              Cálculo sobre toda la historia de cada serie. Anualizado asume retornos mensuales · Sharpe asume rf = 0.
+            </p>
+            <MetricsTable series={series} />
+          </div>
+        </>
+      )}
+
       <div className="mt-6">
         <details className="text-xs">
           <summary className="cursor-pointer text-zinc-500">Ver tabla de retornos crudos</summary>
@@ -117,6 +138,87 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
         </details>
       </div>
     </section>
+  );
+}
+
+function WealthChart({ series }: { series: SeriesData[] }) {
+  const traces = useMemo(
+    () =>
+      series.map((s) => {
+        const w = cumulativeWealth(s.returns, 100);
+        return {
+          type: "scatter" as const,
+          mode: "lines" as const,
+          name: s.name,
+          x: w.map((p) => p.date),
+          y: w.map((p) => p.value),
+          hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra>%{fullData.name}</extra>",
+        };
+      }),
+    [series],
+  );
+  return (
+    <PlotlyChart
+      data={traces}
+      layout={{
+        yaxis: { title: "Wealth (base 100)", type: "log" },
+        xaxis: { title: "Fecha" },
+        hovermode: "x unified",
+        legend: { orientation: "h", y: -0.2 },
+      }}
+      height={420}
+    />
+  );
+}
+
+function MetricsTable({ series }: { series: SeriesData[] }) {
+  const rows = useMemo(
+    () => series.map((s) => ({ id: s.id, name: s.name, m: summarize(s.returns) })),
+    [series],
+  );
+  const fmtPct = (v: number | null, d = 2) =>
+    v == null ? "—" : `${(v * 100).toFixed(d)}%`;
+  const fmtNum = (v: number | null, d = 2) => (v == null ? "—" : v.toFixed(d));
+
+  return (
+    <div className="overflow-x-auto border rounded">
+      <table className="w-full text-xs tabular-nums">
+        <thead className="bg-zinc-100">
+          <tr>
+            <th className="px-3 py-1.5 text-left">Serie</th>
+            <th className="px-2 py-1.5 text-right">Inicio</th>
+            <th className="px-2 py-1.5 text-right">Fin</th>
+            <th className="px-2 py-1.5 text-right">N</th>
+            <th className="px-2 py-1.5 text-right">Retorno total</th>
+            <th className="px-2 py-1.5 text-right">Ret. anual</th>
+            <th className="px-2 py-1.5 text-right">Vol anual</th>
+            <th className="px-2 py-1.5 text-right">Sharpe</th>
+            <th className="px-2 py-1.5 text-right">Max DD</th>
+            <th className="px-2 py-1.5 text-right">% meses +</th>
+            <th className="px-2 py-1.5 text-right">Peor mes</th>
+            <th className="px-2 py-1.5 text-right">Mejor mes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ id, name, m }) => (
+            <tr key={id} className="border-t">
+              <td className="px-3 py-1 text-left">{name}</td>
+              <td className="px-2 py-1 text-right">{m.start ?? "—"}</td>
+              <td className="px-2 py-1 text-right">{m.end ?? "—"}</td>
+              <td className="px-2 py-1 text-right">{m.n}</td>
+              <td className="px-2 py-1 text-right">{fmtPct(m.totalReturn, 1)}</td>
+              <td className="px-2 py-1 text-right">{fmtPct(m.annualReturn)}</td>
+              <td className="px-2 py-1 text-right">{fmtPct(m.annualVol)}</td>
+              <td className="px-2 py-1 text-right">{fmtNum(m.sharpe)}</td>
+              <td className="px-2 py-1 text-right text-red-700">{fmtPct(m.maxDrawdown)}</td>
+              <td className="px-2 py-1 text-right">{fmtPct(m.positivePct, 1)}</td>
+              <td className="px-2 py-1 text-right text-red-700">{fmtPct(m.minMonthly)}</td>
+              <td className="px-2 py-1 text-right text-emerald-700">{fmtPct(m.maxMonthly)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
