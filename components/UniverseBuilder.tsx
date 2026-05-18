@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from "react";
 import type { FrenchDatasetMeta, SeriesData, Region, Family, ReturnPoint } from "@/lib/types";
 import { downloadAllSeriesCSV, downloadSeriesCSV } from "@/lib/download";
 
-function monthEndISO(y: number, m: number): string {
+function monthEndISO(y: number, m: number): string | null {
+  if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12 || y < 1900 || y > 2100) {
+    return null;
+  }
   const last = new Date(Date.UTC(y, m, 0));
   return last.toISOString().slice(0, 10);
 }
