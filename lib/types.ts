@@ -27,4 +27,8 @@ export type Region =
 export type Family =
   | "Size / Book-to-Market"
   | "Size / Profitability"
+  | "Size / Momentum"
+  | "Size"
+  | "Profitability"
+  | "Momentum"
   | "Industry / Sector";

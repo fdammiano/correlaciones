@@ -164,8 +164,12 @@ const REGIONS: Region[] = [
 ];
 
 const FAMILIES: Family[] = [
+  "Size",
+  "Profitability",
+  "Momentum",
   "Size / Book-to-Market",
   "Size / Profitability",
+  "Size / Momentum",
   "Industry / Sector",
 ];
 

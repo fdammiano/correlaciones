@@ -4,37 +4,51 @@ import type { FrenchDatasetMeta, ReturnPoint } from "./types";
 const BASE = "https://mba.tuck.dartmouth.edu/pages/faculty/ken.french/ftp";
 
 export const FRENCH_DATASETS: FrenchDatasetMeta[] = [
-  // US
+  // ===== US =====
+  // single-sort
+  { id: "Portfolios_Formed_on_ME", region: "US", family: "Size", label: "Portfolios formados por Size (ME)" },
+  { id: "Portfolios_Formed_on_OP", region: "US", family: "Profitability", label: "Portfolios formados por OP (profitability)" },
+  { id: "10_Portfolios_Prior_12_2", region: "US", family: "Momentum", label: "10 Portfolios por Momentum (prior 12-2)" },
+  // two-sort
   { id: "6_Portfolios_2x3", region: "US", family: "Size / Book-to-Market", label: "6 Portfolios Size × Book-to-Market" },
   { id: "6_Portfolios_ME_OP_2x3", region: "US", family: "Size / Profitability", label: "6 Portfolios Size × OP" },
+  { id: "6_Portfolios_ME_Prior_12_2", region: "US", family: "Size / Momentum", label: "6 Portfolios Size × Momentum" },
+  // industry
   { id: "10_Industry_Portfolios", region: "US", family: "Industry / Sector", label: "10 Industry Portfolios" },
   { id: "12_Industry_Portfolios", region: "US", family: "Industry / Sector", label: "12 Industry Portfolios" },
   { id: "30_Industry_Portfolios", region: "US", family: "Industry / Sector", label: "30 Industry Portfolios" },
   { id: "48_Industry_Portfolios", region: "US", family: "Industry / Sector", label: "48 Industry Portfolios" },
 
-  // Developed
+  // ===== Developed =====
+  // (single-sort por region no se publica para internacionales; solo two-sort)
   { id: "Developed_6_Portfolios_ME_BE-ME", region: "Developed", family: "Size / Book-to-Market", label: "Developed 6 Portfolios Size × BE/ME" },
   { id: "Developed_6_Portfolios_ME_OP", region: "Developed", family: "Size / Profitability", label: "Developed 6 Portfolios Size × OP" },
+  { id: "Developed_6_Portfolios_ME_Prior_12_2", region: "Developed", family: "Size / Momentum", label: "Developed 6 Portfolios Size × Momentum" },
 
-  // Developed ex US
-  { id: "Developed_ex_US_6_Portfolios_ME_BE-ME", region: "Developed ex US", family: "Size / Book-to-Market", label: "Developed ex-US 6 Portfolios Size × BE/ME" },
-  { id: "Developed_ex_US_6_Portfolios_ME_OP", region: "Developed ex US", family: "Size / Profitability", label: "Developed ex-US 6 Portfolios Size × OP" },
+  // ===== Developed ex US =====
+  { id: "Developed_ex_US_6_Portfolios_ME_BE-ME", region: "Developed ex US", family: "Size / Book-to-Market", label: "Dev ex-US 6 Portfolios Size × BE/ME" },
+  { id: "Developed_ex_US_6_Portfolios_ME_OP", region: "Developed ex US", family: "Size / Profitability", label: "Dev ex-US 6 Portfolios Size × OP" },
+  { id: "Developed_ex_US_6_Portfolios_ME_Prior_12_2", region: "Developed ex US", family: "Size / Momentum", label: "Dev ex-US 6 Portfolios Size × Momentum" },
 
-  // Europe
+  // ===== Europe =====
   { id: "Europe_6_Portfolios_ME_BE-ME", region: "Europe", family: "Size / Book-to-Market", label: "Europe 6 Portfolios Size × BE/ME" },
   { id: "Europe_6_Portfolios_ME_OP", region: "Europe", family: "Size / Profitability", label: "Europe 6 Portfolios Size × OP" },
+  { id: "Europe_6_Portfolios_ME_Prior_12_2", region: "Europe", family: "Size / Momentum", label: "Europe 6 Portfolios Size × Momentum" },
 
-  // Asia Pacific ex Japan
-  { id: "Asia_Pacific_ex_Japan_6_Portfolios_ME_BE-ME", region: "Asia Pacific ex Japan", family: "Size / Book-to-Market", label: "Asia Pacific ex-Japan 6 Portfolios Size × BE/ME" },
-  { id: "Asia_Pacific_ex_Japan_6_Portfolios_ME_OP", region: "Asia Pacific ex Japan", family: "Size / Profitability", label: "Asia Pacific ex-Japan 6 Portfolios Size × OP" },
+  // ===== Asia Pacific ex Japan =====
+  { id: "Asia_Pacific_ex_Japan_6_Portfolios_ME_BE-ME", region: "Asia Pacific ex Japan", family: "Size / Book-to-Market", label: "Asia Pac ex-Japan 6 Portfolios Size × BE/ME" },
+  { id: "Asia_Pacific_ex_Japan_6_Portfolios_ME_OP", region: "Asia Pacific ex Japan", family: "Size / Profitability", label: "Asia Pac ex-Japan 6 Portfolios Size × OP" },
+  { id: "Asia_Pacific_ex_Japan_6_Portfolios_ME_Prior_12_2", region: "Asia Pacific ex Japan", family: "Size / Momentum", label: "Asia Pac ex-Japan 6 Portfolios Size × Momentum" },
 
-  // North America
+  // ===== North America =====
   { id: "North_America_6_Portfolios_ME_BE-ME", region: "North America", family: "Size / Book-to-Market", label: "North America 6 Portfolios Size × BE/ME" },
   { id: "North_America_6_Portfolios_ME_OP", region: "North America", family: "Size / Profitability", label: "North America 6 Portfolios Size × OP" },
+  { id: "North_America_6_Portfolios_ME_Prior_12_2", region: "North America", family: "Size / Momentum", label: "North America 6 Portfolios Size × Momentum" },
 
-  // Emerging Markets (Ken French publica 5 portafolios, no 6)
-  { id: "Emerging_5_Portfolios_BEME", region: "Emerging Markets", family: "Size / Book-to-Market", label: "Emerging 5 Portfolios BE/ME" },
-  { id: "Emerging_5_Portfolios_OP", region: "Emerging Markets", family: "Size / Profitability", label: "Emerging 5 Portfolios OP" },
+  // ===== Emerging Markets =====
+  { id: "Emerging_Markets_6_Portfolios_ME_BE-ME", region: "Emerging Markets", family: "Size / Book-to-Market", label: "Emerging Markets 6 Portfolios Size × BE/ME" },
+  { id: "Emerging_Markets_6_Portfolios_ME_OP", region: "Emerging Markets", family: "Size / Profitability", label: "Emerging Markets 6 Portfolios Size × OP" },
+  { id: "Emerging_Markets_6_Portfolios_ME_Prior_12_2", region: "Emerging Markets", family: "Size / Momentum", label: "Emerging Markets 6 Portfolios Size × Momentum" },
 ];
 
 export type FrenchTable = {
