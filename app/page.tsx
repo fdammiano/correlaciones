@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import UniverseBuilder from "@/components/UniverseBuilder";
 import ChartPanel from "@/components/ChartPanel";
 import type { SeriesData } from "@/lib/types";
@@ -9,7 +9,7 @@ const STORAGE_KEY = "correlations-app:series:v1";
 
 export default function Home() {
   const [series, setSeries] = useState<SeriesData[]>([]);
-  const hydrated = useRef(false);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     try {
@@ -17,7 +17,6 @@ export default function Home() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          // backward compat: items without `active` are treated as active
           const normalized = (parsed as SeriesData[]).map((s) => ({
             ...s,
             active: s.active !== false,
@@ -28,17 +27,25 @@ export default function Home() {
     } catch {
       // ignore corrupted storage
     }
-    hydrated.current = true;
+    setHydrated(true);
   }, []);
 
   useEffect(() => {
-    if (!hydrated.current) return;
+    if (!hydrated) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(series));
-    } catch {
-      // quota or private mode — silently ignore
+    } catch (err) {
+      // QuotaExceeded — fall back to keeping only custom (hand-pasted) series,
+      // since Ken French and Yahoo data can be re-fetched.
+      try {
+        const customOnly = series.filter((s) => s.source === "custom");
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(customOnly));
+        console.warn("localStorage lleno: solo se guardan series pegadas a mano.");
+      } catch {
+        console.warn("localStorage lleno y no se pudo guardar.");
+      }
     }
-  }, [series]);
+  }, [series, hydrated]);
 
   function add(newOnes: SeriesData[]) {
     setSeries((prev) => {
