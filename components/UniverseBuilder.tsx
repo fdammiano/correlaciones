@@ -9,6 +9,85 @@ function monthEndISO(y: number, m: number): string {
   return last.toISOString().slice(0, 10);
 }
 
+const MONTHS: Record<string, number> = {
+  jan: 1, january: 1, ene: 1, enero: 1,
+  feb: 2, february: 2, febrero: 2,
+  mar: 3, march: 3, marzo: 3,
+  apr: 4, april: 4, abr: 4, abril: 4,
+  may: 5, mayo: 5,
+  jun: 6, june: 6, junio: 6,
+  jul: 7, july: 7, julio: 7,
+  aug: 8, august: 8, ago: 8, agosto: 8,
+  sep: 9, sept: 9, september: 9, set: 9, setiembre: 9, septiembre: 9,
+  oct: 10, october: 10, octubre: 10,
+  nov: 11, november: 11, noviembre: 11,
+  dec: 12, december: 12, dic: 12, diciembre: 12,
+};
+
+function parseNumber(raw: string): number {
+  let s = raw.trim().replace(/%/g, "").replace(/\s/g, "");
+  if (!s) return NaN;
+  const hasDot = s.includes(".");
+  const hasComma = s.includes(",");
+  if (hasDot && hasComma) {
+    // "1.234,56" or "1,234.56" — the last one is decimal
+    const lastDot = s.lastIndexOf(".");
+    const lastComma = s.lastIndexOf(",");
+    if (lastComma > lastDot) {
+      s = s.replace(/\./g, "").replace(",", ".");
+    } else {
+      s = s.replace(/,/g, "");
+    }
+  } else if (hasComma) {
+    // Spanish locale: "0,0123" → 0.0123
+    s = s.replace(",", ".");
+  }
+  return parseFloat(s);
+}
+
+function parseDate(raw: string): string | null {
+  // strip any trailing time portion (Excel sometimes pastes "01/02/2020 0:00:00")
+  const r = raw.trim().split(/\s+/)[0];
+  if (!r) return null;
+  // ISO: YYYY-MM-DD or YYYY/MM/DD
+  let m = r.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if (m) return monthEndISO(parseInt(m[1]), parseInt(m[2]));
+  // YYYY-MM
+  m = r.match(/^(\d{4})[-\/](\d{1,2})$/);
+  if (m) return monthEndISO(parseInt(m[1]), parseInt(m[2]));
+  // YYYYMM
+  m = r.match(/^(\d{4})(\d{2})$/);
+  if (m) return monthEndISO(parseInt(m[1]), parseInt(m[2]));
+  // dd/mm/yyyy or dd-mm-yyyy (rioplatense por default)
+  m = r.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (m) {
+    let y = parseInt(m[3]);
+    if (y < 100) y += y < 50 ? 2000 : 1900;
+    return monthEndISO(y, parseInt(m[2]));
+  }
+  // dd-MMM-yyyy or MMM-yyyy or dd MMM yy  (mes en letra)
+  m = r.match(/^(\d{1,2})[-\/ ]([A-Za-zÁÉÍÓÚáéíóúñ]{3,12})[-\/ ](\d{2,4})$/);
+  if (m) {
+    const mon = MONTHS[m[2].toLowerCase()];
+    if (mon) {
+      let y = parseInt(m[3]);
+      if (y < 100) y += y < 50 ? 2000 : 1900;
+      return monthEndISO(y, mon);
+    }
+  }
+  // MMM-yy o MMM-yyyy
+  m = r.match(/^([A-Za-zÁÉÍÓÚáéíóúñ]{3,12})[-\/ ](\d{2,4})$/);
+  if (m) {
+    const mon = MONTHS[m[1].toLowerCase()];
+    if (mon) {
+      let y = parseInt(m[2]);
+      if (y < 100) y += y < 50 ? 2000 : 1900;
+      return monthEndISO(y, mon);
+    }
+  }
+  return null;
+}
+
 function parsePastedCSV(
   text: string,
   kind: "returns_dec" | "returns_pct" | "prices",
@@ -17,33 +96,17 @@ function parsePastedCSV(
   type Row = { date: string; value: number };
   const rows: Row[] = [];
   for (const line of lines) {
-    const parts = line.split(/[,;\t]/).map((p) => p.trim());
+    // split by tab (Excel paste), comma or semicolon
+    const parts = line.split(/[\t,;]/).map((p) => p.trim()).filter(Boolean);
     if (parts.length < 2) continue;
-    const rawDate = parts[0];
-    const rawValue = parts[parts.length - 1].replace(/%/g, "").replace(/,/g, ".");
-    const n = parseFloat(rawValue);
+    const iso = parseDate(parts[0]);
+    if (!iso) continue;
+    const n = parseNumber(parts[parts.length - 1]);
     if (!Number.isFinite(n)) continue;
-
-    let iso: string | null = null;
-    const ymd = rawDate.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-    const ym = rawDate.match(/^(\d{4})-(\d{1,2})$/);
-    const yyyymm = rawDate.match(/^(\d{4})(\d{2})$/);
-    const dmy = rawDate.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-    if (ymd) {
-      iso = monthEndISO(parseInt(ymd[1]), parseInt(ymd[2]));
-    } else if (ym) {
-      iso = monthEndISO(parseInt(ym[1]), parseInt(ym[2]));
-    } else if (yyyymm) {
-      iso = monthEndISO(parseInt(yyyymm[1]), parseInt(yyyymm[2]));
-    } else if (dmy) {
-      iso = monthEndISO(parseInt(dmy[3]), parseInt(dmy[2]));
-    } else {
-      continue;
-    }
     rows.push({ date: iso, value: n });
   }
   if (rows.length === 0) {
-    return { ok: false, error: "No se reconoció ninguna fila válida." };
+    return { ok: false, error: "No se reconoció ninguna fila válida (revisá formato de fechas y números)." };
   }
   rows.sort((a, b) => a.date.localeCompare(b.date));
 
@@ -231,7 +294,7 @@ export default function UniverseBuilder({ series, onAdd, onRemove, onClear }: Pr
           className={`px-3 py-1.5 ${tab === "paste" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
           onClick={() => setTab("paste")}
         >
-          Pegar
+          Excel
         </button>
       </div>
 
@@ -351,16 +414,19 @@ export default function UniverseBuilder({ series, onAdd, onRemove, onClear }: Pr
             </select>
           </div>
           <div>
-            <label className="block text-xs text-zinc-600 mb-1">Pegá CSV (fecha, valor)</label>
+            <label className="block text-xs text-zinc-600 mb-1">
+              Pegá directo desde Excel (fecha + valor)
+            </label>
             <textarea
               rows={10}
               value={pasteText}
               onChange={(e) => setPasteText(e.target.value)}
-              placeholder={"2020-01-31, 321.73\n2020-02-29, 296.26\n2020-03-31, 254.39\n…"}
+              placeholder={"31/01/2020\t321,73\n29/02/2020\t296,26\n31/03/2020\t254,39\n…"}
               className="w-full border border-zinc-300 rounded px-2 py-1 bg-white text-xs font-mono"
             />
             <p className="text-[11px] text-zinc-500 mt-1">
-              Fechas: YYYY-MM-DD, YYYY-MM o YYYYMM. Acepta coma, tab o punto y coma como separador.
+              Seleccioná 2 columnas en Excel y Ctrl+V. Acepta fechas DD/MM/YYYY, YYYY-MM-DD,
+              Ene-20, etc. Coma o punto como decimal.
             </p>
           </div>
           <button
