@@ -82,14 +82,16 @@ export function cumulativeWealth(returns: ReturnPoint[], base = 100): WealthPoin
     .filter((r) => Number.isFinite(r.value))
     .sort((a, b) => a.date.localeCompare(b.date));
   const out: WealthPoint[] = [];
+  if (sorted.length === 0) return out;
+  // Prepend a synthetic anchor at base, one month BEFORE the first return.
+  // That way the first return is fully reflected in the chart (it was being dropped).
+  const firstDate = new Date(sorted[0].date + "T00:00:00Z");
+  const prior = new Date(Date.UTC(firstDate.getUTCFullYear(), firstDate.getUTCMonth(), 0));
+  out.push({ date: prior.toISOString().slice(0, 10), value: base });
   let wealth = base;
-  // anchor first point at base BEFORE applying first return
-  if (sorted.length > 0) {
-    out.push({ date: sorted[0].date, value: wealth });
-    for (let i = 1; i < sorted.length; i++) {
-      wealth *= 1 + sorted[i].value;
-      out.push({ date: sorted[i].date, value: wealth });
-    }
+  for (const r of sorted) {
+    wealth *= 1 + r.value;
+    out.push({ date: r.date, value: wealth });
   }
   return out;
 }

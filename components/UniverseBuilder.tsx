@@ -24,23 +24,17 @@ const MONTHS: Record<string, number> = {
   dec: 12, december: 12, dic: 12, diciembre: 12,
 };
 
-function parseNumber(raw: string): number {
+type DecimalFormat = "comma" | "dot";
+
+function parseNumber(raw: string, fmt: DecimalFormat): number {
   let s = raw.trim().replace(/%/g, "").replace(/\s/g, "");
   if (!s) return NaN;
-  const hasDot = s.includes(".");
-  const hasComma = s.includes(",");
-  if (hasDot && hasComma) {
-    // "1.234,56" or "1,234.56" — the last one is decimal
-    const lastDot = s.lastIndexOf(".");
-    const lastComma = s.lastIndexOf(",");
-    if (lastComma > lastDot) {
-      s = s.replace(/\./g, "").replace(",", ".");
-    } else {
-      s = s.replace(/,/g, "");
-    }
-  } else if (hasComma) {
-    // Spanish locale: "0,0123" → 0.0123
-    s = s.replace(",", ".");
+  if (fmt === "comma") {
+    // Decimal coma, miles punto (Argentina/Uruguay/Europa): "1.234,56" → 1234.56
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else {
+    // Decimal punto, miles coma (US/UK): "1,234.56" → 1234.56
+    s = s.replace(/,/g, "");
   }
   return parseFloat(s);
 }
@@ -88,20 +82,28 @@ function parseDate(raw: string): string | null {
   return null;
 }
 
+type ParsedPaste = {
+  rows: { date: string; value: number }[];
+  returns: ReturnPoint[];
+};
+
 function parsePastedCSV(
   text: string,
   kind: "returns_dec" | "returns_pct" | "prices",
-): { ok: true; returns: ReturnPoint[] } | { ok: false; error: string } {
+  fmt: DecimalFormat,
+): { ok: true; data: ParsedPaste } | { ok: false; error: string } {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   type Row = { date: string; value: number };
   const rows: Row[] = [];
   for (const line of lines) {
-    // split by tab (Excel paste), comma or semicolon
-    const parts = line.split(/[\t,;]/).map((p) => p.trim()).filter(Boolean);
+    // split by tab (Excel paste), comma or semicolon — but only if format is "dot",
+    // because in "comma" mode the comma is a decimal separator inside numbers.
+    const sep = fmt === "comma" ? /[\t;]/ : /[\t,;]/;
+    const parts = line.split(sep).map((p) => p.trim()).filter(Boolean);
     if (parts.length < 2) continue;
     const iso = parseDate(parts[0]);
     if (!iso) continue;
-    const n = parseNumber(parts[parts.length - 1]);
+    const n = parseNumber(parts[parts.length - 1], fmt);
     if (!Number.isFinite(n)) continue;
     rows.push({ date: iso, value: n });
   }
@@ -123,7 +125,7 @@ function parsePastedCSV(
   } else {
     returns = rows.map((r) => ({ date: r.date, value: r.value }));
   }
-  return { ok: true, returns };
+  return { ok: true, data: { rows, returns } };
 }
 
 const REGIONS: Region[] = [
@@ -163,6 +165,7 @@ export default function UniverseBuilder({
   const [pasteName, setPasteName] = useState("SPY");
   const [pasteKind, setPasteKind] = useState<"returns_dec" | "returns_pct" | "prices">("prices");
   const [pasteText, setPasteText] = useState("");
+  const [pasteFmt, setPasteFmt] = useState<DecimalFormat>("comma");
   const [datasets, setDatasets] = useState<FrenchDatasetMeta[]>([]);
   const [region, setRegion] = useState<Region>("US");
   const [family, setFamily] = useState<Family>("Size / Book-to-Market");
@@ -185,6 +188,11 @@ export default function UniverseBuilder({
     () => datasets.filter((d) => d.region === region && d.family === family),
     [datasets, region, family],
   );
+
+  const pastePreview = useMemo(() => {
+    if (!pasteText.trim()) return null;
+    return parsePastedCSV(pasteText, pasteKind, pasteFmt);
+  }, [pasteText, pasteKind, pasteFmt]);
 
   useEffect(() => {
     setDatasetId(filtered[0]?.id ?? "");
@@ -423,6 +431,17 @@ export default function UniverseBuilder({
             </select>
           </div>
           <div>
+            <label className="block text-xs text-zinc-600 mb-1">Formato decimal</label>
+            <select
+              value={pasteFmt}
+              onChange={(e) => setPasteFmt(e.target.value as DecimalFormat)}
+              className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
+            >
+              <option value="comma">Coma decimal — 1.234,56 (Argentina/Uruguay)</option>
+              <option value="dot">Punto decimal — 1,234.56 (US/UK)</option>
+            </select>
+          </div>
+          <div>
             <label className="block text-xs text-zinc-600 mb-1">
               Pegá directo desde Excel (fecha + valor)
             </label>
@@ -434,18 +453,80 @@ export default function UniverseBuilder({
               className="w-full border border-zinc-300 rounded px-2 py-1 bg-white text-xs font-mono"
             />
             <p className="text-[11px] text-zinc-500 mt-1">
-              Seleccioná 2 columnas en Excel y Ctrl+V. Acepta fechas DD/MM/YYYY, YYYY-MM-DD,
-              Ene-20, etc. Coma o punto como decimal.
+              Seleccioná 2 columnas en Excel y Ctrl+V. Fechas DD/MM/YYYY, YYYY-MM-DD,
+              Ene-20, etc.
             </p>
           </div>
+
+          {pastePreview && pastePreview.ok && (
+            <div className="border border-zinc-300 bg-white rounded p-2 text-[11px]">
+              <p className="font-semibold mb-1">
+                Vista previa — {pastePreview.data.rows.length} filas leídas
+                {pasteKind === "prices" && ` → ${pastePreview.data.returns.length} retornos`}
+              </p>
+              <table className="w-full font-mono">
+                <thead className="text-zinc-500">
+                  <tr>
+                    <th className="text-left pr-2">Fecha</th>
+                    <th className="text-right pr-2">Valor leído</th>
+                    {pasteKind === "prices" && <th className="text-right">Retorno calculado</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pastePreview.data.rows.slice(0, 4).map((r, i) => (
+                    <tr key={`h${i}`}>
+                      <td className="pr-2">{r.date}</td>
+                      <td className="pr-2 text-right">{r.value}</td>
+                      {pasteKind === "prices" && (
+                        <td className="text-right">
+                          {i === 0
+                            ? "—"
+                            : `${(((r.value / pastePreview.data.rows[i - 1].value) - 1) * 100).toFixed(2)}%`}
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                  {pastePreview.data.rows.length > 8 && (
+                    <tr>
+                      <td colSpan={3} className="text-center text-zinc-400 py-0.5">⋮</td>
+                    </tr>
+                  )}
+                  {pastePreview.data.rows.slice(-3).map((r, i) => {
+                    const idx = pastePreview.data.rows.length - 3 + i;
+                    return (
+                      <tr key={`t${i}`}>
+                        <td className="pr-2">{r.date}</td>
+                        <td className="pr-2 text-right">{r.value}</td>
+                        {pasteKind === "prices" && (
+                          <td className="text-right">
+                            {idx === 0
+                              ? "—"
+                              : `${(((r.value / pastePreview.data.rows[idx - 1].value) - 1) * 100).toFixed(2)}%`}
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <p className="text-zinc-500 mt-1">
+                Revisá: los valores deberían coincidir con tu Excel. Si ves todo dividido por 1000 o algo raro,
+                cambiá el formato decimal arriba.
+              </p>
+            </div>
+          )}
+          {pastePreview && !pastePreview.ok && (
+            <p className="text-xs text-red-600">{pastePreview.error}</p>
+          )}
+
           <button
             onClick={() => {
-              const parsed = parsePastedCSV(pasteText, pasteKind);
+              const parsed = parsePastedCSV(pasteText, pasteKind, pasteFmt);
               if (!parsed.ok) {
                 setError(parsed.error);
                 return;
               }
-              if (parsed.returns.length === 0) {
+              if (parsed.data.returns.length === 0) {
                 setError("No se pudo parsear ninguna fila.");
                 return;
               }
@@ -455,7 +536,7 @@ export default function UniverseBuilder({
                   id: `paste::${pasteName}::${Date.now()}`,
                   name: pasteName.trim() || "Custom",
                   source: "custom",
-                  returns: parsed.returns,
+                  returns: parsed.data.returns,
                 },
               ]);
               setPasteText("");
