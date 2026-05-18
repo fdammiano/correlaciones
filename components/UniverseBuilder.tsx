@@ -32,14 +32,36 @@ type DecimalFormat = "comma" | "dot";
 function parseNumber(raw: string, fmt: DecimalFormat): number {
   let s = raw.trim().replace(/%/g, "").replace(/\s/g, "");
   if (!s) return NaN;
+  const sign = s.startsWith("-") ? -1 : 1;
+  if (s.startsWith("+") || s.startsWith("-")) s = s.slice(1);
+
+  const hasDot = s.includes(".");
+  const hasComma = s.includes(",");
+
   if (fmt === "comma") {
-    // Decimal coma, miles punto (Argentina/Uruguay/Europa): "1.234,56" → 1234.56
-    s = s.replace(/\./g, "").replace(",", ".");
+    if (hasComma) {
+      // proper rioplatense format: dots are thousands, comma is decimal
+      s = s.replace(/\./g, "").replace(",", ".");
+    } else if (hasDot) {
+      // Ambiguous: only dots in "comma" mode. If pattern looks like grouped
+      // thousands (e.g. "1.234" or "12.345.678"), strip dots. Otherwise
+      // treat as US-style decimal even though user picked comma mode.
+      const looksThousand = /^\d{1,3}(\.\d{3})+$/.test(s);
+      if (looksThousand) s = s.replace(/\./g, "");
+      // else leave as is — parseFloat will use the dot as decimal
+    }
   } else {
-    // Decimal punto, miles coma (US/UK): "1,234.56" → 1234.56
-    s = s.replace(/,/g, "");
+    if (hasDot) {
+      // proper US format: commas are thousands, dot is decimal
+      s = s.replace(/,/g, "");
+    } else if (hasComma) {
+      // Ambiguous: only commas in "dot" mode. Similar grouping check.
+      const looksThousand = /^\d{1,3}(,\d{3})+$/.test(s);
+      if (looksThousand) s = s.replace(/,/g, "");
+      else s = s.replace(",", ".");
+    }
   }
-  return parseFloat(s);
+  return sign * parseFloat(s);
 }
 
 function parseDate(raw: string): string | null {
