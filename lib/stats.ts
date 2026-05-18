@@ -92,6 +92,31 @@ export function correlation(
   return cov / denom;
 }
 
+/** First date where every series has a finite value (i.e., the intersection start). */
+export function commonStartDate(series: SeriesData[]): string | null {
+  if (series.length === 0) return null;
+  const firsts: string[] = [];
+  for (const s of series) {
+    const f = [...s.returns]
+      .filter((r) => Number.isFinite(r.value))
+      .map((r) => r.date)
+      .sort();
+    if (f.length === 0) return null;
+    firsts.push(f[0]);
+  }
+  return firsts.reduce((mx, d) => (d > mx ? d : mx));
+}
+
+/** Drop leading entries whose y is null so Plotly's x-axis starts at first data. */
+export function trimLeadingNulls(
+  x: string[],
+  y: (number | null)[],
+): { x: string[]; y: (number | null)[] } {
+  let i = 0;
+  while (i < y.length && y[i] == null) i++;
+  return { x: x.slice(i), y: y.slice(i) };
+}
+
 export function correlationMatrix(
   series: SeriesData[],
   lastN?: number,
