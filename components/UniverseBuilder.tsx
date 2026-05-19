@@ -64,6 +64,25 @@ function parseNumber(raw: string, fmt: DecimalFormat): number {
   return sign * parseFloat(s);
 }
 
+// Convert cryptic Ken French column names into a human-readable position.
+// Returns an array of "position labels" (1 for single-sort, 2 for bivariate
+// 6_Portfolios datasets) so the sidebar can stack them visually.
+function prettifyKenFrenchCol(col: string): string[] {
+  const c = col.trim();
+  // 6 Portfolios bivariate: Size × {BM, OP, Momentum} — pattern is one of
+  //   SMALL Lo*, ME1 *2, SMALL Hi*, BIG Lo*, ME2 *2, BIG Hi*
+  if (/^SMALL\s+Lo/i.test(c)) return ["Small", "Low"];
+  if (/^SMALL\s+Hi/i.test(c)) return ["Small", "High"];
+  if (/^BIG\s+Lo/i.test(c)) return ["Big", "Low"];
+  if (/^BIG\s+Hi/i.test(c)) return ["Big", "High"];
+  if (/^ME1\b/i.test(c)) return ["Small", "Mid"];
+  if (/^ME2\b/i.test(c)) return ["Big", "Mid"];
+  // single-sort common patterns
+  if (/^Lo\s*\d+$/i.test(c)) return [`Bottom (${c})`];
+  if (/^Hi\s*\d+$/i.test(c)) return [`Top (${c})`];
+  return [c];
+}
+
 function parseDate(raw: string): string | null {
   // strip any trailing time portion (Excel sometimes pastes "01/02/2020 0:00:00")
   const r = raw.trim().split(/\s+/)[0];
@@ -585,6 +604,8 @@ export default function UniverseBuilder({
                 const sepIdx = s.name.indexOf(" · ");
                 const dsPart = sepIdx > 0 ? s.name.slice(0, sepIdx) : null;
                 const subPart = sepIdx > 0 ? s.name.slice(sepIdx + 3) : s.name;
+                const positions =
+                  s.source === "french" ? prettifyKenFrenchCol(subPart) : [subPart];
                 return (
                   <li key={s.id} className="flex items-start gap-2 text-xs">
                     <input
@@ -614,7 +635,21 @@ export default function UniverseBuilder({
                           {dsPart}
                         </div>
                       )}
-                      <div className="font-medium break-words">{subPart}</div>
+                      {positions.length === 2 ? (
+                        <div className="flex items-baseline gap-1.5 break-words">
+                          <span className="font-medium">{positions[0]}</span>
+                          <span className="text-zinc-400">×</span>
+                          <span className="font-medium">{positions[1]}</span>
+                          <span className="text-[10px] text-zinc-400 ml-1">({subPart})</span>
+                        </div>
+                      ) : (
+                        <div className="font-medium break-words">
+                          {positions[0]}
+                          {positions[0] !== subPart && (
+                            <span className="text-[10px] text-zinc-400 ml-1">({subPart})</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </li>
                 );
