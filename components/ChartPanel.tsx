@@ -14,12 +14,14 @@ import { cumulativeWealth, summarize } from "@/lib/metrics";
 import { regress, type Regression } from "@/lib/regression";
 import type { SeriesData } from "@/lib/types";
 
-type Mode = "one-vs-many" | "pair" | "matrix";
+type Mode = "rolling" | "matrix" | "regression";
+type RollingSub = "one-vs-many" | "pair";
 
 const WINDOWS = [12, 24, 30, 36, 60, 120];
 
 export default function ChartPanel({ series }: { series: SeriesData[] }) {
-  const [mode, setMode] = useState<Mode>("one-vs-many");
+  const [mode, setMode] = useState<Mode>("rolling");
+  const [rollingSub, setRollingSub] = useState<RollingSub>("one-vs-many");
   const [window, setWindow] = useState(60);
   const [benchmark, setBenchmark] = useState<string>("");
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
@@ -52,24 +54,37 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
             onChange={(e) => setMode(e.target.value as Mode)}
             className="border border-zinc-300 rounded px-2 py-1 bg-white"
           >
-            <option value="one-vs-many">Uno vs varios</option>
-            <option value="pair">Par individual</option>
-            <option value="matrix">Matriz estática</option>
+            <option value="rolling">Rolling correlation</option>
+            <option value="matrix">Matriz</option>
+            <option value="regression">Regresión</option>
           </select>
         </div>
-        {mode !== "matrix" && (
-          <div>
-            <label className="block text-xs text-zinc-600 mb-1">Ventana (meses)</label>
-            <select
-              value={window}
-              onChange={(e) => setWindow(Number(e.target.value))}
-              className="border border-zinc-300 rounded px-2 py-1 bg-white"
-            >
-              {WINDOWS.map((w) => (
-                <option key={w} value={w}>{w}</option>
-              ))}
-            </select>
-          </div>
+        {mode === "rolling" && (
+          <>
+            <div>
+              <label className="block text-xs text-zinc-600 mb-1">Vista</label>
+              <select
+                value={rollingSub}
+                onChange={(e) => setRollingSub(e.target.value as RollingSub)}
+                className="border border-zinc-300 rounded px-2 py-1 bg-white"
+              >
+                <option value="one-vs-many">Uno vs varios</option>
+                <option value="pair">Par individual</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-zinc-600 mb-1">Ventana (meses)</label>
+              <select
+                value={window}
+                onChange={(e) => setWindow(Number(e.target.value))}
+                className="border border-zinc-300 rounded px-2 py-1 bg-white"
+              >
+                {WINDOWS.map((w) => (
+                  <option key={w} value={w}>{w}</option>
+                ))}
+              </select>
+            </div>
+          </>
         )}
         {mode === "matrix" && (
           <div>
@@ -95,7 +110,7 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
         <div className="rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           Agregá al menos 2 series para calcular correlaciones.
         </div>
-      ) : mode === "one-vs-many" ? (
+      ) : mode === "rolling" && rollingSub === "one-vs-many" ? (
         <OneVsMany
           series={series}
           window={window}
@@ -105,10 +120,19 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
           excluded={excluded}
           setExcluded={setExcluded}
         />
-      ) : mode === "pair" ? (
-        <PairView
+      ) : mode === "rolling" && rollingSub === "pair" ? (
+        <PairRolling
           series={series}
           window={window}
+          aligned={aligned}
+          a={effectivePairA}
+          b={effectivePairB}
+          setA={setPairA}
+          setB={setPairB}
+        />
+      ) : mode === "regression" ? (
+        <RegressionMode
+          series={series}
           aligned={aligned}
           a={effectivePairA}
           b={effectivePairB}
@@ -358,7 +382,42 @@ function OneVsMany({
   );
 }
 
-function PairView({
+function PairAB({
+  series,
+  a,
+  b,
+  setA,
+  setB,
+}: {
+  series: SeriesData[];
+  a: string;
+  b: string;
+  setA: (v: string) => void;
+  setB: (v: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-3 text-sm items-end">
+      <div>
+        <label className="block text-xs text-zinc-600 mb-1">Serie A</label>
+        <select value={a} onChange={(e) => setA(e.target.value)} className="border border-zinc-300 rounded px-2 py-1 bg-white min-w-[260px]">
+          {series.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <label className="block text-xs text-zinc-600 mb-1">Serie B</label>
+        <select value={b} onChange={(e) => setB(e.target.value)} className="border border-zinc-300 rounded px-2 py-1 bg-white min-w-[260px]">
+          {series.filter((s) => s.id !== a).map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function PairRolling({
   series,
   window,
   aligned,
@@ -375,7 +434,6 @@ function PairView({
   setA: (v: string) => void;
   setB: (v: string) => void;
 }) {
-  const [analysis, setAnalysis] = useState<"pearson" | "regression">("pearson");
   const arrA = aligned.byId[a] ?? [];
   const arrB = aligned.byId[b] ?? [];
   const nameA = series.find((s) => s.id === a)?.name ?? "A";
@@ -383,48 +441,43 @@ function PairView({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-3 text-sm items-end">
-        <div>
-          <label className="block text-xs text-zinc-600 mb-1">Serie A</label>
-          <select value={a} onChange={(e) => setA(e.target.value)} className="border border-zinc-300 rounded px-2 py-1 bg-white min-w-[260px]">
-            {series.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-zinc-600 mb-1">Serie B</label>
-          <select value={b} onChange={(e) => setB(e.target.value)} className="border border-zinc-300 rounded px-2 py-1 bg-white min-w-[260px]">
-            {series.filter((s) => s.id !== a).map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-zinc-600 mb-1">Análisis</label>
-          <select
-            value={analysis}
-            onChange={(e) => setAnalysis(e.target.value as any)}
-            className="border border-zinc-300 rounded px-2 py-1 bg-white"
-          >
-            <option value="pearson">Correlación rolling (Pearson)</option>
-            <option value="regression">Regresión OLS (A = α + β · B)</option>
-          </select>
-        </div>
-      </div>
+      <PairAB series={series} a={a} b={b} setA={setA} setB={setB} />
+      <PearsonRolling
+        dates={aligned.dates}
+        arrA={arrA}
+        arrB={arrB}
+        window={window}
+        nameA={nameA}
+        nameB={nameB}
+      />
+    </div>
+  );
+}
 
-      {analysis === "pearson" ? (
-        <PearsonRolling
-          dates={aligned.dates}
-          arrA={arrA}
-          arrB={arrB}
-          window={window}
-          nameA={nameA}
-          nameB={nameB}
-        />
-      ) : (
-        <RegressionView arrA={arrA} arrB={arrB} nameA={nameA} nameB={nameB} />
-      )}
+function RegressionMode({
+  series,
+  aligned,
+  a,
+  b,
+  setA,
+  setB,
+}: {
+  series: SeriesData[];
+  aligned: ReturnType<typeof alignSeries>;
+  a: string;
+  b: string;
+  setA: (v: string) => void;
+  setB: (v: string) => void;
+}) {
+  const arrA = aligned.byId[a] ?? [];
+  const arrB = aligned.byId[b] ?? [];
+  const nameA = series.find((s) => s.id === a)?.name ?? "A";
+  const nameB = series.find((s) => s.id === b)?.name ?? "B";
+
+  return (
+    <div className="space-y-4">
+      <PairAB series={series} a={a} b={b} setA={setA} setB={setB} />
+      <RegressionView arrA={arrA} arrB={arrB} nameA={nameA} nameB={nameB} />
     </div>
   );
 }
