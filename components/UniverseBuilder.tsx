@@ -211,8 +211,9 @@ export default function UniverseBuilder({
   onSetAllActive,
   storageBadge,
 }: Props) {
-  const [tab, setTab] = useState<"french" | "paste">("french");
+  const [tab, setTab] = useState<"french" | "yahoo" | "paste">("french");
   const [pasteName, setPasteName] = useState("SPY");
+  const [tickerInput, setTickerInput] = useState("SPY, ^GSPC, ^DJI");
   const [pasteKind, setPasteKind] = useState<"returns_dec" | "returns_pct" | "prices">("prices");
   const [pasteText, setPasteText] = useState("");
   const [pasteFmt, setPasteFmt] = useState<DecimalFormat>("comma");
@@ -304,6 +305,42 @@ export default function UniverseBuilder({
     }
   }
 
+  async function addTickers() {
+    const tickers = tickerInput.split(",").map((t) => t.trim()).filter(Boolean);
+    if (tickers.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const results = await Promise.all(
+        tickers.map(async (t) => {
+          const res = await fetch(`/api/yahoo?ticker=${encodeURIComponent(t)}`);
+          if (!res.ok) {
+            const msg = (await res.json()).error || res.statusText;
+            throw new Error(`${t}: ${msg}`);
+          }
+          const data = await res.json();
+          const returns = (data.returns ?? []) as ReturnPoint[];
+          return {
+            id: `yf::${t}`,
+            name: `Yahoo · ${t}`,
+            source: "yahoo" as const,
+            returns,
+          };
+        }),
+      );
+      const ok = results.filter((r) => r.returns.length > 0);
+      if (ok.length === 0) {
+        setError("Yahoo no devolvió datos para esos tickers.");
+      } else {
+        onAdd(ok);
+      }
+    } catch (e: any) {
+      setError(e.message ?? "Error bajando tickers");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function toggleCol(c: string) {
     setSelectedCols((prev) =>
       prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
@@ -342,6 +379,12 @@ export default function UniverseBuilder({
           onClick={() => setTab("french")}
         >
           Ken French
+        </button>
+        <button
+          className={`px-3 py-1.5 ${tab === "yahoo" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
+          onClick={() => setTab("yahoo")}
+        >
+          Yahoo
         </button>
         <button
           className={`px-3 py-1.5 ${tab === "paste" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
@@ -416,6 +459,35 @@ export default function UniverseBuilder({
           >
             {busy ? "Agregando…" : "Agregar al universo"}
           </button>
+        </div>
+      )}
+
+      {tab === "yahoo" && (
+        <div className="space-y-3 text-sm">
+          <div>
+            <label className="block text-xs text-zinc-600 mb-1">Tickers (separados por coma)</label>
+            <textarea
+              rows={3}
+              value={tickerInput}
+              onChange={(e) => setTickerInput(e.target.value)}
+              className="w-full border border-zinc-300 rounded px-2 py-1 bg-white text-xs font-mono"
+              placeholder="SPY, ^GSPC, ^DJI, QQQ, EEM, EWZ"
+            />
+            <p className="text-[11px] text-zinc-500 mt-1">
+              ETFs / acciones: <b>SPY, QQQ, IWN, EEM, EWZ</b>. Índices con caret: <b>^GSPC</b>, <b>^DJI</b>, <b>^IXIC</b>, <b>^RUT</b>, <b>^STOXX50E</b>. Los retornos se calculan desde el <b>adjusted close</b> de Yahoo (incluye dividendos + splits → total return).
+            </p>
+          </div>
+          <button
+            disabled={busy}
+            onClick={addTickers}
+            className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded disabled:opacity-40"
+          >
+            {busy ? "Bajando…" : "Bajar de Yahoo"}
+          </button>
+          <p className="text-[11px] text-zinc-400">
+            Si Yahoo devuelve "Too Many Requests" probá de nuevo en unos minutos —
+            limitan por IP. Como alternativa, usá la pestaña Excel.
+          </p>
         </div>
       )}
 
