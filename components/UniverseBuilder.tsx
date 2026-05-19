@@ -211,9 +211,8 @@ export default function UniverseBuilder({
   onSetAllActive,
   storageBadge,
 }: Props) {
-  const [tab, setTab] = useState<"french" | "yahoo" | "ms" | "paste">("french");
+  const [tab, setTab] = useState<"french" | "ms" | "paste">("french");
   const [pasteName, setPasteName] = useState("SPY");
-  const [tickerInput, setTickerInput] = useState("SPY, ^GSPC, ^DJI");
   const [msIdType, setMsIdType] = useState<"isin" | "ticker" | "secid">("isin");
   const [msIdValue, setMsIdValue] = useState("");
   const [msName, setMsName] = useState("");
@@ -346,42 +345,6 @@ export default function UniverseBuilder({
     }
   }
 
-  async function addTickers() {
-    const tickers = tickerInput.split(",").map((t) => t.trim()).filter(Boolean);
-    if (tickers.length === 0) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const results = await Promise.all(
-        tickers.map(async (t) => {
-          const res = await fetch(`/api/yahoo?ticker=${encodeURIComponent(t)}`);
-          if (!res.ok) {
-            const msg = (await res.json()).error || res.statusText;
-            throw new Error(`${t}: ${msg}`);
-          }
-          const data = await res.json();
-          const returns = (data.returns ?? []) as ReturnPoint[];
-          return {
-            id: `yf::${t}`,
-            name: `Yahoo · ${t}`,
-            source: "yahoo" as const,
-            returns,
-          };
-        }),
-      );
-      const ok = results.filter((r) => r.returns.length > 0);
-      if (ok.length === 0) {
-        setError("Yahoo no devolvió datos para esos tickers.");
-      } else {
-        onAdd(ok);
-      }
-    } catch (e: any) {
-      setError(e.message ?? "Error bajando tickers");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   function toggleCol(c: string) {
     setSelectedCols((prev) =>
       prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
@@ -420,12 +383,6 @@ export default function UniverseBuilder({
           onClick={() => setTab("french")}
         >
           Ken French
-        </button>
-        <button
-          className={`px-3 py-1.5 ${tab === "yahoo" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
-          onClick={() => setTab("yahoo")}
-        >
-          Yahoo
         </button>
         <button
           className={`px-3 py-1.5 ${tab === "ms" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
@@ -506,56 +463,6 @@ export default function UniverseBuilder({
           >
             {busy ? "Agregando…" : "Agregar al universo"}
           </button>
-        </div>
-      )}
-
-      {tab === "yahoo" && (
-        <div className="space-y-3 text-sm">
-          <div>
-            <label className="block text-xs text-zinc-600 mb-1">Tickers (separados por coma)</label>
-            <textarea
-              rows={3}
-              value={tickerInput}
-              onChange={(e) => setTickerInput(e.target.value)}
-              className="w-full border border-zinc-300 rounded px-2 py-1 bg-white text-xs font-mono"
-              placeholder="SPY, QQQ, IWN, EEM, EWZ"
-            />
-          </div>
-          <button
-            disabled={busy}
-            onClick={addTickers}
-            className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded disabled:opacity-40"
-          >
-            {busy ? "Bajando…" : "Bajar de Yahoo"}
-          </button>
-          <div className="text-[11px] text-zinc-600 space-y-1.5 bg-amber-50 border border-amber-200 rounded p-2">
-            <p className="font-semibold text-amber-900">⚠ Para total return: usá ETFs, no índices</p>
-            <p>
-              Yahoo&apos;s adjusted close <b>solo incluye dividendos para ETFs/acciones</b>.
-              Los índices price (^GSPC, ^DJI, ^IXIC, ^RUT) dan price return — Yahoo no publica
-              la versión TR para esos vía esta API.
-            </p>
-            <p className="mt-1">
-              Equivalencias TR vía ETF:
-            </p>
-            <table className="text-[10px] w-full">
-              <tbody>
-                <tr><td>S&amp;P 500</td><td className="text-right"><code>SPY</code> (o IVV, VOO)</td></tr>
-                <tr><td>Dow Jones</td><td className="text-right"><code>DIA</code></td></tr>
-                <tr><td>Nasdaq 100</td><td className="text-right"><code>QQQ</code></td></tr>
-                <tr><td>Russell 2000</td><td className="text-right"><code>IWM</code></td></tr>
-                <tr><td>Russell 2000 Value</td><td className="text-right"><code>IWN</code></td></tr>
-                <tr><td>Russell 2000 Growth</td><td className="text-right"><code>IWO</code></td></tr>
-                <tr><td>MSCI EAFE</td><td className="text-right"><code>EFA</code> / <code>VEA</code></td></tr>
-                <tr><td>MSCI Emerging</td><td className="text-right"><code>EEM</code> / <code>VWO</code></td></tr>
-                <tr><td>Stoxx 600</td><td className="text-right"><code>EXSA.DE</code></td></tr>
-              </tbody>
-            </table>
-          </div>
-          <p className="text-[11px] text-zinc-400">
-            Si Yahoo devuelve "Too Many Requests" probá en unos minutos — limitan por IP.
-            Como alternativa siempre podés bajar el TR desde Bloomberg / Excel y pegar en la pestaña Excel.
-          </p>
         </div>
       )}
 
