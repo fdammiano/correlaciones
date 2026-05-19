@@ -211,9 +211,14 @@ export default function UniverseBuilder({
   onSetAllActive,
   storageBadge,
 }: Props) {
-  const [tab, setTab] = useState<"french" | "yahoo" | "paste">("french");
+  const [tab, setTab] = useState<"french" | "yahoo" | "ms" | "paste">("french");
   const [pasteName, setPasteName] = useState("SPY");
   const [tickerInput, setTickerInput] = useState("SPY, ^GSPC, ^DJI");
+  const [msIdType, setMsIdType] = useState<"isin" | "ticker" | "secid">("isin");
+  const [msIdValue, setMsIdValue] = useState("");
+  const [msName, setMsName] = useState("");
+  const [msDatapoint, setMsDatapoint] = useState("");
+  const [msStart, setMsStart] = useState("2000-01-01");
   const [pasteKind, setPasteKind] = useState<"returns_dec" | "returns_pct" | "prices">("prices");
   const [pasteText, setPasteText] = useState("");
   const [pasteFmt, setPasteFmt] = useState<DecimalFormat>("comma");
@@ -305,6 +310,46 @@ export default function UniverseBuilder({
     }
   }
 
+  async function addMorningstar() {
+    if (!msIdValue.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      params.set(msIdType, msIdValue.trim());
+      params.set("start", msStart);
+      if (msDatapoint.trim()) params.set("datapoint", msDatapoint.trim());
+      const res = await fetch(`/api/morningstar?${params.toString()}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || data.detail || res.statusText);
+      }
+      const returns = (data.returns ?? []) as ReturnPoint[];
+      if (returns.length === 0) {
+        const cols = data.schema_columns ?? [];
+        throw new Error(
+          `Sin retornos parseables. La SDK devolvió columnas: [${cols.join(", ")}]. ` +
+            `Probá otro datapoint id o pasame ese listado.`,
+        );
+      }
+      const label = msName.trim() || `${msIdType.toUpperCase()}:${msIdValue.trim()}`;
+      onAdd([
+        {
+          id: `ms::${msIdType}::${msIdValue.trim()}::${Date.now()}`,
+          name: `Morningstar · ${label}`,
+          source: "custom",
+          returns,
+        },
+      ]);
+      setMsIdValue("");
+      setMsName("");
+    } catch (e: any) {
+      setError(e.message ?? "Error con Morningstar");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addTickers() {
     const tickers = tickerInput.split(",").map((t) => t.trim()).filter(Boolean);
     if (tickers.length === 0) return;
@@ -385,6 +430,12 @@ export default function UniverseBuilder({
           onClick={() => setTab("yahoo")}
         >
           Yahoo
+        </button>
+        <button
+          className={`px-3 py-1.5 ${tab === "ms" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
+          onClick={() => setTab("ms")}
+        >
+          Morningstar
         </button>
         <button
           className={`px-3 py-1.5 ${tab === "paste" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
@@ -508,6 +559,76 @@ export default function UniverseBuilder({
           <p className="text-[11px] text-zinc-400">
             Si Yahoo devuelve "Too Many Requests" probá en unos minutos — limitan por IP.
             Como alternativa siempre podés bajar el TR desde Bloomberg / Excel y pegar en la pestaña Excel.
+          </p>
+        </div>
+      )}
+
+      {tab === "ms" && (
+        <div className="space-y-3 text-sm">
+          <div className="flex gap-2">
+            <div className="w-24">
+              <label className="block text-xs text-zinc-600 mb-1">ID type</label>
+              <select
+                value={msIdType}
+                onChange={(e) => setMsIdType(e.target.value as any)}
+                className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
+              >
+                <option value="isin">ISIN</option>
+                <option value="ticker">Ticker</option>
+                <option value="secid">SecId</option>
+              </select>
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-zinc-600 mb-1">Identifier</label>
+              <input
+                value={msIdValue}
+                onChange={(e) => setMsIdValue(e.target.value)}
+                placeholder="US12345..."
+                className="w-full border border-zinc-300 rounded px-2 py-1 bg-white font-mono text-xs"
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-600 mb-1">Nombre para mostrar</label>
+            <input
+              value={msName}
+              onChange={(e) => setMsName(e.target.value)}
+              placeholder="Russell 2000 Value TR"
+              className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
+            />
+          </div>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <label className="block text-xs text-zinc-600 mb-1">Inicio</label>
+              <input
+                value={msStart}
+                onChange={(e) => setMsStart(e.target.value)}
+                placeholder="2000-01-01"
+                className="w-full border border-zinc-300 rounded px-2 py-1 bg-white font-mono text-xs"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs text-zinc-600 mb-1">Datapoint id (opt)</label>
+              <input
+                value={msDatapoint}
+                onChange={(e) => setMsDatapoint(e.target.value)}
+                placeholder="OS018"
+                className="w-full border border-zinc-300 rounded px-2 py-1 bg-white font-mono text-xs"
+              />
+            </div>
+          </div>
+          <button
+            disabled={busy || !msIdValue.trim()}
+            onClick={addMorningstar}
+            className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded disabled:opacity-40"
+          >
+            {busy ? "Bajando…" : "Bajar de Morningstar"}
+          </button>
+          <p className="text-[11px] text-zinc-500">
+            Trae monthly total return vía la SDK <code>morningstar_data</code>. El token vive en
+            Vercel como <code>MD_AUTH_TOKEN</code> — si la API devuelve "schema_columns" raro,
+            el id de datapoint no es el correcto y hay que ajustar <code>MD_TR_DATAPOINT</code> o
+            pasar uno en el campo de arriba.
           </p>
         </div>
       )}
