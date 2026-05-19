@@ -150,22 +150,34 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
                         except Exception:
                             continue
                 else:
-                    # Try wide format: date columns are ISO-looking strings.
+                    # Wide format: column names contain an ISO date — the
+                    # MS-Direct shape is one row per security, columns like
+                    # "Monthly Return 2000-01-31", "Monthly Return 2000-02-29",
+                    # ... so extract the date from each column name.
                     import re as _re
 
-                    iso = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
-                    date_cols = [c for c in df.columns if isinstance(c, str) and iso.match(c)]
-                    if date_cols and len(df) >= 1:
+                    iso_anywhere = _re.compile(r"(\d{4}-\d{2}-\d{2})")
+                    date_cols_with_iso = []
+                    for c in df.columns:
+                        if isinstance(c, str):
+                            m = iso_anywhere.search(c)
+                            if m:
+                                date_cols_with_iso.append((c, m.group(1)))
+                    if date_cols_with_iso and len(df) >= 1:
                         row0 = df.iloc[0]
-                        for c in date_cols:
-                            v = row0[c]
+                        for col_name, iso_date in date_cols_with_iso:
+                            v = row0[col_name]
                             if v is None:
                                 continue
                             try:
-                                v_dec = float(v) / 100.0
-                                returns.append({"date": c, "value": v_dec})
+                                fv = float(v)
+                                if fv != fv:  # NaN check
+                                    continue
+                                returns.append({"date": iso_date, "value": fv / 100.0})
                             except Exception:
                                 continue
+                        # Sort by date
+                        returns.sort(key=lambda r: r["date"])
 
             _send(
                 self,
