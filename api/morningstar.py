@@ -41,12 +41,12 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
                 _send(self, {"error": "Pass one of isin, ticker, or secid."}, 400)
                 return
 
-            start_date = qs.get("start", ["2000-01-01"])[0]
-            end_date = qs.get("end", [datetime.utcnow().strftime("%Y-%m-%d")])[0]
-            datapoint = qs.get(
-                "datapoint",
-                [os.environ.get("MD_TR_DATAPOINT", "HP010")],
-            )[0]
+            # Locked to Monthly Total Return, longest history available.
+            # No client override of datapoint, frequency, or start date —
+            # this avoids accidentally pulling Price Return or daily data.
+            start_date = "1970-01-01"
+            end_date = datetime.utcnow().strftime("%Y-%m-%d")
+            datapoint = "HP010"
 
             token = os.environ.get("MD_AUTH_TOKEN")
             if not token:

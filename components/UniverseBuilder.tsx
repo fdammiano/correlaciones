@@ -217,8 +217,6 @@ export default function UniverseBuilder({
   const [msIdType, setMsIdType] = useState<"isin" | "ticker" | "secid">("isin");
   const [msIdValue, setMsIdValue] = useState("");
   const [msName, setMsName] = useState("");
-  const [msDatapoint, setMsDatapoint] = useState("");
-  const [msStart, setMsStart] = useState("2000-01-01");
   const [pasteKind, setPasteKind] = useState<"returns_dec" | "returns_pct" | "prices">("prices");
   const [pasteText, setPasteText] = useState("");
   const [pasteFmt, setPasteFmt] = useState<DecimalFormat>("comma");
@@ -317,8 +315,6 @@ export default function UniverseBuilder({
     try {
       const params = new URLSearchParams();
       params.set(msIdType, msIdValue.trim());
-      params.set("start", msStart);
-      if (msDatapoint.trim()) params.set("datapoint", msDatapoint.trim());
       const res = await fetch(`/api/morningstar?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) {
@@ -597,26 +593,6 @@ export default function UniverseBuilder({
               className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
             />
           </div>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="block text-xs text-zinc-600 mb-1">Inicio</label>
-              <input
-                value={msStart}
-                onChange={(e) => setMsStart(e.target.value)}
-                placeholder="2000-01-01"
-                className="w-full border border-zinc-300 rounded px-2 py-1 bg-white font-mono text-xs"
-              />
-            </div>
-            <div className="flex-1">
-              <label className="block text-xs text-zinc-600 mb-1">Datapoint id (opt)</label>
-              <input
-                value={msDatapoint}
-                onChange={(e) => setMsDatapoint(e.target.value)}
-                placeholder="OS018"
-                className="w-full border border-zinc-300 rounded px-2 py-1 bg-white font-mono text-xs"
-              />
-            </div>
-          </div>
           <button
             disabled={busy || !msIdValue.trim()}
             onClick={addMorningstar}
@@ -624,12 +600,14 @@ export default function UniverseBuilder({
           >
             {busy ? "Bajando…" : "Bajar de Morningstar"}
           </button>
-          <p className="text-[11px] text-zinc-500">
-            Trae monthly total return vía la SDK <code>morningstar_data</code>. El token vive en
-            Vercel como <code>MD_AUTH_TOKEN</code> — si la API devuelve "schema_columns" raro,
-            el id de datapoint no es el correcto y hay que ajustar <code>MD_TR_DATAPOINT</code> o
-            pasar uno en el campo de arriba.
-          </p>
+          <div className="text-[11px] text-zinc-600 bg-zinc-100 border border-zinc-200 rounded p-2 space-y-1">
+            <p>
+              <b>Lo que se baja:</b> retornos mensuales <b>total return</b> (HP010, NAV-based,
+              dividendos reinvertidos), máxima historia disponible para ese security.
+              No hay opciones para evitar errores: si querés precio sin dividendos u otra
+              frecuencia, usá Bloomberg + pestaña Excel.
+            </p>
+          </div>
         </div>
       )}
 
