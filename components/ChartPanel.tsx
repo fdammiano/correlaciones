@@ -11,7 +11,7 @@ import {
   trimLeadingNulls,
 } from "@/lib/stats";
 import { cumulativeWealth, summarize } from "@/lib/metrics";
-import { regress, type Regression } from "@/lib/regression";
+import { multiRegress, type MultiRegression } from "@/lib/multiregression";
 import type { SeriesData } from "@/lib/types";
 
 type Mode = "rolling" | "matrix" | "regression";
@@ -131,14 +131,7 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
           setB={setPairB}
         />
       ) : mode === "regression" ? (
-        <RegressionMode
-          series={series}
-          aligned={aligned}
-          a={effectivePairA}
-          b={effectivePairB}
-          setA={setPairA}
-          setB={setPairB}
-        />
+        <RegressionMode series={series} aligned={aligned} />
       ) : (
         <MatrixView series={series} lastN={matrixLastN} />
       )}
@@ -457,28 +450,279 @@ function PairRolling({
 function RegressionMode({
   series,
   aligned,
-  a,
-  b,
-  setA,
-  setB,
 }: {
   series: SeriesData[];
   aligned: ReturnType<typeof alignSeries>;
-  a: string;
-  b: string;
-  setA: (v: string) => void;
-  setB: (v: string) => void;
 }) {
-  const arrA = aligned.byId[a] ?? [];
-  const arrB = aligned.byId[b] ?? [];
-  const nameA = series.find((s) => s.id === a)?.name ?? "A";
-  const nameB = series.find((s) => s.id === b)?.name ?? "B";
+  const [yId, setYId] = useState<string>("");
+  const [xIds, setXIds] = useState<Set<string>>(new Set());
+
+  // Sensible defaults: first series as Y, second as the only X.
+  const effectiveY = yId && series.some((s) => s.id === yId) ? yId : series[0]?.id ?? "";
+  const effectiveX = useMemo(() => {
+    const filtered = new Set<string>();
+    for (const id of xIds) {
+      if (id !== effectiveY && series.some((s) => s.id === id)) filtered.add(id);
+    }
+    if (filtered.size === 0) {
+      const fallback = series.find((s) => s.id !== effectiveY);
+      if (fallback) filtered.add(fallback.id);
+    }
+    return filtered;
+  }, [xIds, effectiveY, series]);
+
+  const yName = series.find((s) => s.id === effectiveY)?.name ?? "Y";
+  const yArr = aligned.byId[effectiveY] ?? [];
+
+  const xCols = useMemo(
+    () =>
+      Array.from(effectiveX).map((id) => ({
+        id,
+        name: series.find((s) => s.id === id)?.name ?? id,
+        values: aligned.byId[id] ?? [],
+      })),
+    [effectiveX, series, aligned],
+  );
+
+  const reg = useMemo(
+    () => multiRegress(yArr, xCols.map((c) => ({ name: c.name, values: c.values }))),
+    [yArr, xCols],
+  );
+
+  function toggleX(id: string) {
+    setXIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   return (
     <div className="space-y-4">
-      <PairAB series={series} a={a} b={b} setA={setA} setB={setB} />
-      <RegressionView arrA={arrA} arrB={arrB} nameA={nameA} nameB={nameB} />
+      <div className="flex flex-wrap gap-4 items-start text-sm">
+        <div>
+          <label className="block text-xs text-zinc-600 mb-1">Dependiente (Y)</label>
+          <select
+            value={effectiveY}
+            onChange={(e) => setYId(e.target.value)}
+            className="border border-zinc-300 rounded px-2 py-1 bg-white min-w-[260px]"
+          >
+            {series.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex-1 min-w-[280px]">
+          <label className="block text-xs text-zinc-600 mb-1">
+            Independientes (X) — {effectiveX.size} seleccionada{effectiveX.size === 1 ? "" : "s"}
+          </label>
+          <div className="border border-zinc-300 rounded bg-white max-h-44 overflow-y-auto">
+            {series
+              .filter((s) => s.id !== effectiveY)
+              .map((s) => {
+                const checked = effectiveX.has(s.id);
+                return (
+                  <label
+                    key={s.id}
+                    className="flex items-start gap-2 px-2 py-1 text-xs hover:bg-zinc-50 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleX(s.id)}
+                      className="mt-0.5"
+                    />
+                    <span className="break-words">{s.name}</span>
+                  </label>
+                );
+              })}
+          </div>
+        </div>
+      </div>
+
+      <RegressionResults reg={reg} yName={yName} xCols={xCols} />
     </div>
+  );
+}
+
+function RegressionResults({
+  reg,
+  yName,
+  xCols,
+}: {
+  reg: MultiRegression | null;
+  yName: string;
+  xCols: { id: string; name: string; values: (number | null)[] }[];
+}) {
+  if (!reg) {
+    return (
+      <div className="border rounded bg-amber-50 border-amber-200 p-4 text-sm text-amber-900">
+        No hay suficientes observaciones superpuestas para regresar (necesitás al menos k+2 meses
+        en común entre Y y todas las X seleccionadas).
+      </div>
+    );
+  }
+
+  const fmtP = (p: number) =>
+    !Number.isFinite(p) ? "—" : p < 1e-4 ? "<0.0001" : p.toFixed(4);
+  const sigBadge = (p: number) =>
+    p < 0.001
+      ? { label: "***", cls: "bg-emerald-100 text-emerald-800" }
+      : p < 0.01
+      ? { label: "**", cls: "bg-emerald-100 text-emerald-800" }
+      : p < 0.05
+      ? { label: "*", cls: "bg-emerald-100 text-emerald-800" }
+      : { label: "n.s.", cls: "bg-zinc-100 text-zinc-600" };
+
+  const isInterceptLike = (i: number) => i === 0;
+
+  // Scatter visual:
+  //  k=1 → classic Y vs X with OLS line
+  //  k>1 → actual vs fitted (45° line)
+  let plotData: any[];
+  let plotLayout: any;
+  if (reg.k === 1) {
+    const x = (xCols[0]?.values ?? [])
+      .map((v, i) => ({ v, y: reg.yObserved[i] }))
+      .filter(() => true);
+    const xs: number[] = [];
+    const ys: number[] = [];
+    // Reconstruct from reg.fitted + residuals to ensure paired
+    // (multiRegress already pairwise-dropped any missing rows)
+    for (let i = 0; i < reg.yObserved.length; i++) {
+      ys.push(reg.yObserved[i]);
+    }
+    // For the X axis in the k=1 case we need the regressor values in the
+    // same filtered order as fitted/residuals. The cleanest is to invert
+    // the fitted = α + β·x relationship.
+    const a = reg.coefficients[0].value;
+    const b = reg.coefficients[1].value;
+    for (let i = 0; i < reg.fitted.length; i++) {
+      xs.push((reg.fitted[i] - a) / (b || 1));
+    }
+    const xMin = Math.min(...xs);
+    const xMax = Math.max(...xs);
+    plotData = [
+      {
+        type: "scatter",
+        mode: "markers",
+        name: "Observaciones",
+        x: xs,
+        y: ys,
+        marker: { size: 5, opacity: 0.55 },
+        hovertemplate: `${xCols[0].name}: %{x:.2%} · ${yName}: %{y:.2%}<extra></extra>`,
+      },
+      {
+        type: "scatter",
+        mode: "lines",
+        name: "OLS fit",
+        x: [xMin, xMax],
+        y: [a + b * xMin, a + b * xMax],
+        line: { color: "#dc2626", width: 2 },
+        hoverinfo: "skip",
+      },
+    ];
+    plotLayout = {
+      title: `OLS: ${yName} = α + β · ${xCols[0].name}`,
+      xaxis: { title: xCols[0].name, tickformat: ".0%" },
+      yaxis: { title: yName, tickformat: ".0%" },
+      legend: { orientation: "h", y: -0.2 },
+    };
+  } else {
+    const mn = Math.min(...reg.yObserved, ...reg.fitted);
+    const mx = Math.max(...reg.yObserved, ...reg.fitted);
+    plotData = [
+      {
+        type: "scatter",
+        mode: "markers",
+        name: "Observaciones",
+        x: reg.fitted,
+        y: reg.yObserved,
+        marker: { size: 5, opacity: 0.55 },
+        hovertemplate: `fitted: %{x:.2%} · ${yName}: %{y:.2%}<extra></extra>`,
+      },
+      {
+        type: "scatter",
+        mode: "lines",
+        name: "45° (perfecto)",
+        x: [mn, mx],
+        y: [mn, mx],
+        line: { color: "#dc2626", width: 2, dash: "dot" },
+        hoverinfo: "skip",
+      },
+    ];
+    plotLayout = {
+      title: `Actual vs Fitted — ${yName} = α + Σ βᵢ · Xᵢ (k=${reg.k})`,
+      xaxis: { title: `Fitted ${yName}`, tickformat: ".0%" },
+      yaxis: { title: `Observed ${yName}`, tickformat: ".0%" },
+      legend: { orientation: "h", y: -0.2 },
+    };
+  }
+
+  return (
+    <>
+      <PlotlyChart data={plotData} layout={plotLayout} height={500} />
+
+      <div className="overflow-x-auto border rounded">
+        <table className="w-full text-xs tabular-nums">
+          <thead className="bg-zinc-100">
+            <tr>
+              <th className="px-3 py-1.5 text-left">Coeficiente</th>
+              <th className="px-2 py-1.5 text-right">Valor</th>
+              <th className="px-2 py-1.5 text-right">Error std</th>
+              <th className="px-2 py-1.5 text-right">t</th>
+              <th className="px-2 py-1.5 text-right">p-value</th>
+              <th className="px-2 py-1.5 text-center">Sig. (α=0.05)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {reg.coefficients.map((c, i) => {
+              const badge = sigBadge(c.p);
+              const asPct = isInterceptLike(i);
+              return (
+                <tr key={c.name} className="border-t">
+                  <td className="px-3 py-1.5 text-left">{c.name}</td>
+                  <td className="px-2 py-1.5 text-right">
+                    {asPct ? `${(c.value * 100).toFixed(3)}%` : c.value.toFixed(4)}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    {asPct ? `${(c.se * 100).toFixed(3)}%` : c.se.toFixed(4)}
+                  </td>
+                  <td className="px-2 py-1.5 text-right">{c.t.toFixed(3)}</td>
+                  <td className="px-2 py-1.5 text-right">{fmtP(c.p)}</td>
+                  <td className="px-2 py-1.5 text-center">
+                    <span className={`inline-block px-2 py-0.5 rounded ${badge.cls}`}>
+                      {badge.label}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid grid-cols-5 gap-3 text-sm">
+        <Metric label="R²" value={reg.r2} />
+        <Metric label="R² ajustado" value={reg.adjustedR2} />
+        <Metric label="N" value={reg.n} integer />
+        <Metric label="RMSE" value={reg.rmse} asPct />
+        <Metric
+          label="F-test"
+          stringValue={
+            Number.isFinite(reg.fStat)
+              ? `F=${reg.fStat.toFixed(2)} · p=${fmtP(reg.fPValue)}`
+              : "—"
+          }
+        />
+      </div>
+
+      <p className="text-[11px] text-zinc-500">
+        Significancia: *** p&lt;0.001 · ** p&lt;0.01 · * p&lt;0.05 · n.s. no significativa.
+        F-test = significancia conjunta de todas las β.
+      </p>
+    </>
   );
 }
 
@@ -532,178 +776,6 @@ function PearsonRolling({
         <Metric label="ρ máxima" value={max} />
       </div>
     </>
-  );
-}
-
-function RegressionView({
-  arrA,
-  arrB,
-  nameA,
-  nameB,
-}: {
-  arrA: (number | null)[];
-  arrB: (number | null)[];
-  nameA: string;
-  nameB: string;
-}) {
-  // y = α + β · x  →  A on B
-  const pairs: { x: number; y: number }[] = [];
-  for (let i = 0; i < arrA.length; i++) {
-    const x = arrB[i];
-    const y = arrA[i];
-    if (x != null && y != null && Number.isFinite(x) && Number.isFinite(y)) {
-      pairs.push({ x, y });
-    }
-  }
-  const xs = pairs.map((p) => p.x);
-  const ys = pairs.map((p) => p.y);
-  const reg = regress(ys, xs);
-
-  if (!reg) {
-    return (
-      <div className="border rounded bg-amber-50 border-amber-200 p-4 text-sm text-amber-900">
-        No hay suficientes observaciones superpuestas para regresar.
-      </div>
-    );
-  }
-
-  const xMin = Math.min(...xs);
-  const xMax = Math.max(...xs);
-  const lineX = [xMin, xMax];
-  const lineY = [reg.alpha + reg.beta * xMin, reg.alpha + reg.beta * xMax];
-
-  return (
-    <>
-      <PlotlyChart
-        data={[
-          {
-            type: "scatter",
-            mode: "markers",
-            name: "Observaciones",
-            x: xs,
-            y: ys,
-            marker: { size: 5, opacity: 0.55 },
-            hovertemplate: `${nameB}: %{x:.2%} · ${nameA}: %{y:.2%}<extra></extra>`,
-          },
-          {
-            type: "scatter",
-            mode: "lines",
-            name: "OLS fit",
-            x: lineX,
-            y: lineY,
-            line: { color: "#dc2626", width: 2 },
-            hoverinfo: "skip",
-          },
-        ]}
-        layout={{
-          title: `OLS: ${nameA} = α + β · ${nameB}`,
-          xaxis: { title: nameB, tickformat: ".0%" },
-          yaxis: { title: nameA, tickformat: ".0%" },
-          showlegend: true,
-          legend: { orientation: "h", y: -0.2 },
-        }}
-        height={500}
-      />
-      <RegressionTable reg={reg} nameA={nameA} nameB={nameB} />
-    </>
-  );
-}
-
-function RegressionTable({
-  reg,
-  nameA,
-  nameB,
-}: {
-  reg: Regression;
-  nameA: string;
-  nameB: string;
-}) {
-  const fmt = (n: number, d = 4) => (Number.isFinite(n) ? n.toFixed(d) : "—");
-  const fmtP = (p: number) => (Number.isFinite(p) ? (p < 1e-4 ? "<0.0001" : p.toFixed(4)) : "—");
-  const sigBadge = (p: number) =>
-    p < 0.001
-      ? { label: "***", cls: "bg-emerald-100 text-emerald-800" }
-      : p < 0.01
-      ? { label: "**", cls: "bg-emerald-100 text-emerald-800" }
-      : p < 0.05
-      ? { label: "*", cls: "bg-emerald-100 text-emerald-800" }
-      : { label: "n.s.", cls: "bg-zinc-100 text-zinc-600" };
-
-  const rows = [
-    {
-      name: "α (intercept)",
-      coef: reg.alpha,
-      se: reg.seAlpha,
-      t: reg.tAlpha,
-      p: reg.pAlpha,
-      coefAsPct: true,
-    },
-    {
-      name: `β (${nameB})`,
-      coef: reg.beta,
-      se: reg.seBeta,
-      t: reg.tBeta,
-      p: reg.pBeta,
-      coefAsPct: false,
-    },
-  ];
-
-  return (
-    <div className="space-y-3">
-      <div className="overflow-x-auto border rounded">
-        <table className="w-full text-xs tabular-nums">
-          <thead className="bg-zinc-100">
-            <tr>
-              <th className="px-3 py-1.5 text-left">Coeficiente</th>
-              <th className="px-2 py-1.5 text-right">Valor</th>
-              <th className="px-2 py-1.5 text-right">Error std</th>
-              <th className="px-2 py-1.5 text-right">t</th>
-              <th className="px-2 py-1.5 text-right">p-value</th>
-              <th className="px-2 py-1.5 text-center">Sig. (α=0.05)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => {
-              const badge = sigBadge(r.p);
-              return (
-                <tr key={r.name} className="border-t">
-                  <td className="px-3 py-1.5 text-left">{r.name}</td>
-                  <td className="px-2 py-1.5 text-right">
-                    {r.coefAsPct ? `${(r.coef * 100).toFixed(3)}%` : fmt(r.coef)}
-                  </td>
-                  <td className="px-2 py-1.5 text-right">
-                    {r.coefAsPct ? `${(r.se * 100).toFixed(3)}%` : fmt(r.se)}
-                  </td>
-                  <td className="px-2 py-1.5 text-right">{fmt(r.t, 3)}</td>
-                  <td className="px-2 py-1.5 text-right">{fmtP(r.p)}</td>
-                  <td className="px-2 py-1.5 text-center">
-                    <span className={`inline-block px-2 py-0.5 rounded ${badge.cls}`}>
-                      {badge.label}
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <div className="grid grid-cols-4 gap-3 text-sm">
-        <Metric label="R²" value={reg.r2} />
-        <Metric label="N" value={reg.n} integer />
-        <Metric label="RMSE" value={reg.rmse} asPct />
-        <Metric
-          label={`Conclusión β`}
-          stringValue={
-            reg.pBeta < 0.05
-              ? `Significativa (p=${reg.pBeta < 1e-4 ? "<0.0001" : reg.pBeta.toFixed(4)})`
-              : `No significativa (p=${reg.pBeta.toFixed(3)})`
-          }
-        />
-      </div>
-      <p className="text-[11px] text-zinc-500">
-        Significancia: *** p&lt;0.001 · ** p&lt;0.01 · * p&lt;0.05 · n.s. no significativa
-      </p>
-    </div>
   );
 }
 
