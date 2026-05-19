@@ -471,11 +471,8 @@ export default function UniverseBuilder({
               value={tickerInput}
               onChange={(e) => setTickerInput(e.target.value)}
               className="w-full border border-zinc-300 rounded px-2 py-1 bg-white text-xs font-mono"
-              placeholder="SPY, ^GSPC, ^DJI, QQQ, EEM, EWZ"
+              placeholder="SPY, QQQ, IWN, EEM, EWZ"
             />
-            <p className="text-[11px] text-zinc-500 mt-1">
-              ETFs / acciones: <b>SPY, QQQ, IWN, EEM, EWZ</b>. Índices con caret: <b>^GSPC</b>, <b>^DJI</b>, <b>^IXIC</b>, <b>^RUT</b>, <b>^STOXX50E</b>. Los retornos se calculan desde el <b>adjusted close</b> de Yahoo (incluye dividendos + splits → total return).
-            </p>
           </div>
           <button
             disabled={busy}
@@ -484,9 +481,33 @@ export default function UniverseBuilder({
           >
             {busy ? "Bajando…" : "Bajar de Yahoo"}
           </button>
+          <div className="text-[11px] text-zinc-600 space-y-1.5 bg-amber-50 border border-amber-200 rounded p-2">
+            <p className="font-semibold text-amber-900">⚠ Para total return: usá ETFs, no índices</p>
+            <p>
+              Yahoo&apos;s adjusted close <b>solo incluye dividendos para ETFs/acciones</b>.
+              Los índices price (^GSPC, ^DJI, ^IXIC, ^RUT) dan price return — Yahoo no publica
+              la versión TR para esos vía esta API.
+            </p>
+            <p className="mt-1">
+              Equivalencias TR vía ETF:
+            </p>
+            <table className="text-[10px] w-full">
+              <tbody>
+                <tr><td>S&amp;P 500</td><td className="text-right"><code>SPY</code> (o IVV, VOO)</td></tr>
+                <tr><td>Dow Jones</td><td className="text-right"><code>DIA</code></td></tr>
+                <tr><td>Nasdaq 100</td><td className="text-right"><code>QQQ</code></td></tr>
+                <tr><td>Russell 2000</td><td className="text-right"><code>IWM</code></td></tr>
+                <tr><td>Russell 2000 Value</td><td className="text-right"><code>IWN</code></td></tr>
+                <tr><td>Russell 2000 Growth</td><td className="text-right"><code>IWO</code></td></tr>
+                <tr><td>MSCI EAFE</td><td className="text-right"><code>EFA</code> / <code>VEA</code></td></tr>
+                <tr><td>MSCI Emerging</td><td className="text-right"><code>EEM</code> / <code>VWO</code></td></tr>
+                <tr><td>Stoxx 600</td><td className="text-right"><code>EXSA.DE</code></td></tr>
+              </tbody>
+            </table>
+          </div>
           <p className="text-[11px] text-zinc-400">
-            Si Yahoo devuelve "Too Many Requests" probá de nuevo en unos minutos —
-            limitan por IP. Como alternativa, usá la pestaña Excel.
+            Si Yahoo devuelve "Too Many Requests" probá en unos minutos — limitan por IP.
+            Como alternativa siempre podés bajar el TR desde Bloomberg / Excel y pegar en la pestaña Excel.
           </p>
         </div>
       )}

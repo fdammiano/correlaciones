@@ -40,22 +40,26 @@ export async function fetchMonthlyTotalReturns(
   }
   quotes.sort((a, b) => a.date.getTime() - b.date.getTime());
 
+  // Use adjclose strictly — falling back to close would silently drop
+  // dividends and give price return instead of total return.
+  const withAdj = quotes.filter(
+    (q) => q.adjclose != null && Number.isFinite(q.adjclose as number),
+  );
+  if (withAdj.length === 0) {
+    throw new Error(
+      `${ticker}: Yahoo no devolvió adjusted close. Para total return usá un ETF (SPY, DIA, QQQ, IWN, EEM…) en vez del índice price.`,
+    );
+  }
   const out: ReturnPoint[] = [];
-  for (let i = 1; i < quotes.length; i++) {
-    const prev = (quotes[i - 1].adjclose ?? quotes[i - 1].close) as number | null;
-    const cur = (quotes[i].adjclose ?? quotes[i].close) as number | null;
-    if (
-      prev != null &&
-      cur != null &&
-      Number.isFinite(prev) &&
-      Number.isFinite(cur) &&
-      prev > 0
-    ) {
-      out.push({ date: monthEndISO(quotes[i].date), value: cur / prev - 1 });
+  for (let i = 1; i < withAdj.length; i++) {
+    const prev = withAdj[i - 1].adjclose as number;
+    const cur = withAdj[i].adjclose as number;
+    if (prev > 0) {
+      out.push({ date: monthEndISO(withAdj[i].date), value: cur / prev - 1 });
     }
   }
   if (out.length === 0) {
-    throw new Error(`Yahoo no devolvió datos para ${ticker}`);
+    throw new Error(`Yahoo no devolvió suficientes datos para ${ticker}`);
   }
   return out;
 }
