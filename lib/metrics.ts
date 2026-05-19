@@ -14,7 +14,12 @@ export type SeriesMetrics = {
   totalReturn: number | null;
 };
 
-export function summarize(returns: ReturnPoint[]): SeriesMetrics {
+// Default annual risk-free assumption used by Sharpe. Approximate average
+// of 1-yr T-bill yields over the last few years; the UI exposes it so
+// the user can override per analysis.
+export const DEFAULT_RF = 0.0375;
+
+export function summarize(returns: ReturnPoint[], rf: number = DEFAULT_RF): SeriesMetrics {
   const sorted = [...returns]
     .filter((r) => Number.isFinite(r.value))
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -44,7 +49,7 @@ export function summarize(returns: ReturnPoint[]): SeriesMetrics {
   const variance = vals.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1);
   const sd = Math.sqrt(variance);
   const annualVol = sd * Math.sqrt(12);
-  const sharpe = annualVol > 0 ? annualReturn / annualVol : null;
+  const sharpe = annualVol > 0 ? (annualReturn - rf) / annualVol : null;
 
   let wealth = 1;
   let peak = 1;
@@ -96,6 +101,9 @@ export function cumulativeWealth(returns: ReturnPoint[], base = 100): WealthPoin
   return out;
 }
 
-export function summarizeAll(series: SeriesData[]): { id: string; name: string; metrics: SeriesMetrics }[] {
-  return series.map((s) => ({ id: s.id, name: s.name, metrics: summarize(s.returns) }));
+export function summarizeAll(
+  series: SeriesData[],
+  rf: number = DEFAULT_RF,
+): { id: string; name: string; metrics: SeriesMetrics }[] {
+  return series.map((s) => ({ id: s.id, name: s.name, metrics: summarize(s.returns, rf) }));
 }

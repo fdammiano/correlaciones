@@ -10,7 +10,7 @@ import {
   rollingCorrelation,
   trimLeadingNulls,
 } from "@/lib/stats";
-import { cumulativeWealth, summarize } from "@/lib/metrics";
+import { cumulativeWealth, DEFAULT_RF, summarize } from "@/lib/metrics";
 import { multiRegress, type MultiRegression } from "@/lib/multiregression";
 import type { SeriesData } from "@/lib/types";
 
@@ -148,9 +148,6 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
 
           <div className="mt-8">
             <h2 className="text-sm font-semibold mb-2">Métricas resumen</h2>
-            <p className="text-[11px] text-zinc-500 mb-2">
-              Cálculo sobre toda la historia de cada serie. Anualizado asume retornos mensuales · Sharpe asume rf = 0.
-            </p>
             <MetricsTable series={series} />
           </div>
         </>
@@ -208,53 +205,75 @@ function WealthChart({ series }: { series: SeriesData[] }) {
 }
 
 function MetricsTable({ series }: { series: SeriesData[] }) {
+  const [rfPct, setRfPct] = useState<number>(DEFAULT_RF * 100); // % anual
+  const rf = rfPct / 100;
   const rows = useMemo(
-    () => series.map((s) => ({ id: s.id, name: s.name, m: summarize(s.returns) })),
-    [series],
+    () => series.map((s) => ({ id: s.id, name: s.name, m: summarize(s.returns, rf) })),
+    [series, rf],
   );
   const fmtPct = (v: number | null, d = 2) =>
     v == null ? "—" : `${(v * 100).toFixed(d)}%`;
   const fmtNum = (v: number | null, d = 2) => (v == null ? "—" : v.toFixed(d));
 
   return (
-    <div className="overflow-x-auto border rounded">
-      <table className="w-full text-xs tabular-nums">
-        <thead className="bg-zinc-100">
-          <tr>
-            <th className="px-3 py-1.5 text-left">Serie</th>
-            <th className="px-2 py-1.5 text-right">Inicio</th>
-            <th className="px-2 py-1.5 text-right">Fin</th>
-            <th className="px-2 py-1.5 text-right">N</th>
-            <th className="px-2 py-1.5 text-right">Retorno total</th>
-            <th className="px-2 py-1.5 text-right">Ret. anual</th>
-            <th className="px-2 py-1.5 text-right">Vol anual</th>
-            <th className="px-2 py-1.5 text-right">Sharpe</th>
-            <th className="px-2 py-1.5 text-right">Max DD</th>
-            <th className="px-2 py-1.5 text-right">% meses +</th>
-            <th className="px-2 py-1.5 text-right">Peor mes</th>
-            <th className="px-2 py-1.5 text-right">Mejor mes</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(({ id, name, m }) => (
-            <tr key={id} className="border-t">
-              <td className="px-3 py-1 text-left">{name}</td>
-              <td className="px-2 py-1 text-right">{m.start ?? "—"}</td>
-              <td className="px-2 py-1 text-right">{m.end ?? "—"}</td>
-              <td className="px-2 py-1 text-right">{m.n}</td>
-              <td className="px-2 py-1 text-right">{fmtPct(m.totalReturn, 1)}</td>
-              <td className="px-2 py-1 text-right">{fmtPct(m.annualReturn)}</td>
-              <td className="px-2 py-1 text-right">{fmtPct(m.annualVol)}</td>
-              <td className="px-2 py-1 text-right">{fmtNum(m.sharpe)}</td>
-              <td className="px-2 py-1 text-right text-red-700">{fmtPct(m.maxDrawdown)}</td>
-              <td className="px-2 py-1 text-right">{fmtPct(m.positivePct, 1)}</td>
-              <td className="px-2 py-1 text-right text-red-700">{fmtPct(m.minMonthly)}</td>
-              <td className="px-2 py-1 text-right text-emerald-700">{fmtPct(m.maxMonthly)}</td>
+    <>
+      <div className="flex flex-wrap items-end gap-3 mb-2 text-[11px] text-zinc-600">
+        <p className="flex-1">
+          Cálculo sobre toda la historia de cada serie. Retornos y vol anualizados desde mensuales.
+        </p>
+        <label className="flex items-center gap-2">
+          <span>Risk-free anual (Sharpe):</span>
+          <input
+            type="number"
+            value={rfPct}
+            step={0.25}
+            onChange={(e) => setRfPct(Number(e.target.value))}
+            className="w-16 border border-zinc-300 rounded px-2 py-0.5 bg-white text-right tabular-nums"
+          />
+          <span>%</span>
+        </label>
+      </div>
+      <div className="overflow-x-auto border rounded">
+        <table className="w-full text-xs tabular-nums">
+          <thead className="bg-zinc-100">
+            <tr>
+              <th className="px-3 py-1.5 text-left">Serie</th>
+              <th className="px-2 py-1.5 text-right">Inicio</th>
+              <th className="px-2 py-1.5 text-right">Fin</th>
+              <th className="px-2 py-1.5 text-right">N</th>
+              <th className="px-2 py-1.5 text-right">Retorno total</th>
+              <th className="px-2 py-1.5 text-right">Ret. anual</th>
+              <th className="px-2 py-1.5 text-right">Vol anual</th>
+              <th className="px-2 py-1.5 text-right" title={`Sharpe = (Ret. anual − ${rfPct}%) / Vol anual`}>
+                Sharpe
+              </th>
+              <th className="px-2 py-1.5 text-right">Max DD</th>
+              <th className="px-2 py-1.5 text-right">% meses con retorno positivo</th>
+              <th className="px-2 py-1.5 text-right">Peor mes</th>
+              <th className="px-2 py-1.5 text-right">Mejor mes</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {rows.map(({ id, name, m }) => (
+              <tr key={id} className="border-t">
+                <td className="px-3 py-1 text-left">{name}</td>
+                <td className="px-2 py-1 text-right">{m.start ?? "—"}</td>
+                <td className="px-2 py-1 text-right">{m.end ?? "—"}</td>
+                <td className="px-2 py-1 text-right">{m.n}</td>
+                <td className="px-2 py-1 text-right">{fmtPct(m.totalReturn, 1)}</td>
+                <td className="px-2 py-1 text-right">{fmtPct(m.annualReturn)}</td>
+                <td className="px-2 py-1 text-right">{fmtPct(m.annualVol)}</td>
+                <td className="px-2 py-1 text-right">{fmtNum(m.sharpe)}</td>
+                <td className="px-2 py-1 text-right text-red-700">{fmtPct(m.maxDrawdown)}</td>
+                <td className="px-2 py-1 text-right">{fmtPct(m.positivePct, 1)}</td>
+                <td className="px-2 py-1 text-right text-red-700">{fmtPct(m.minMonthly)}</td>
+                <td className="px-2 py-1 text-right text-emerald-700">{fmtPct(m.maxMonthly)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
@@ -583,19 +602,12 @@ function RegressionResults({
   let plotData: any[];
   let plotLayout: any;
   if (reg.k === 1) {
-    const x = (xCols[0]?.values ?? [])
-      .map((v, i) => ({ v, y: reg.yObserved[i] }))
-      .filter(() => true);
+    // For the X axis in the k=1 case we recover the regressor values in
+    // the same filtered order as fitted/residuals by inverting the fit:
+    //   x_i = (fitted_i − α) / β
+    // multiRegress already pairwise-dropped any missing rows.
+    const ys = reg.yObserved.slice();
     const xs: number[] = [];
-    const ys: number[] = [];
-    // Reconstruct from reg.fitted + residuals to ensure paired
-    // (multiRegress already pairwise-dropped any missing rows)
-    for (let i = 0; i < reg.yObserved.length; i++) {
-      ys.push(reg.yObserved[i]);
-    }
-    // For the X axis in the k=1 case we need the regressor values in the
-    // same filtered order as fitted/residuals. The cleanest is to invert
-    // the fitted = α + β·x relationship.
     const a = reg.coefficients[0].value;
     const b = reg.coefficients[1].value;
     for (let i = 0; i < reg.fitted.length; i++) {
