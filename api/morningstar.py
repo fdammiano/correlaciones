@@ -45,7 +45,7 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
             end_date = qs.get("end", [datetime.utcnow().strftime("%Y-%m-%d")])[0]
             datapoint = qs.get(
                 "datapoint",
-                [os.environ.get("MD_TR_DATAPOINT", "OS018")],
+                [os.environ.get("MD_TR_DATAPOINT", "HP010")],
             )[0]
 
             token = os.environ.get("MD_AUTH_TOKEN")
@@ -76,13 +76,27 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
             else:
                 investment = InvestmentIdentifier(secId=secid)
 
+            # Full datapoint setting matching what MS Direct's Analytics Lab
+            # emits for the "Monthly Return" datapoint (HP010, calculationId=1).
+            # All the calc* fields determine WHICH of the 36 grouped variants
+            # of Monthly Return you get — these match a standard total return
+            # in base currency, % units.
             data_points = [
                 {
                     "datapointId": datapoint,
+                    "datapointName": "Monthly Return",
+                    "calculationId": "1",
                     "isTsdp": True,
+                    "frequency": "m",
                     "startDate": start_date,
                     "endDate": end_date,
-                    "frequency": "Monthly",
+                    "currency": "BASE",
+                    "calcCurType": "Return",
+                    "calcSdType": "r",
+                    "calcUse5Days": True,
+                    "compounding": "0",
+                    "annualized": False,
+                    "isEpdp": True,
                 }
             ]
 
@@ -91,21 +105,38 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
             )
 
             # Normalize the DataFrame into [{date, value}] entries.
-            # Schema returned by md.direct.get_investment_data varies per
-            # datapoint shape — try the common conventions in order.
-            returns = []
+            returns: list = []
+            sample_row = None
+            columns: list = []
             if df is not None and len(df) > 0:
-                # Convention A: long format with columns ['Date', <datapointId>]
+                columns = list(df.columns)
+                # Pick the first row as a debug sample
+                try:
+                    sample_row = {k: str(v)[:80] for k, v in df.iloc[0].to_dict().items()}
+                except Exception:
+                    pass
+
+                # Detect (date, value) columns. MS-Direct DataFrames for time
+                # series usually look like one of:
+                #   long  → ['Id', 'Name', 'Date', 'HP010']
+                #   wide  → ['Id', 'Name', '2020-01-31', '2020-02-29', ...]
                 date_col = None
                 value_col = None
                 for cand in ("Date", "date", "AsOfDate", "asOfDate"):
                     if cand in df.columns:
                         date_col = cand
                         break
-                for cand in (datapoint, f"{datapoint}_value", "Value", "value"):
+                for cand in (
+                    datapoint,
+                    f"{datapoint}_value",
+                    "Monthly Return",
+                    "Value",
+                    "value",
+                ):
                     if cand in df.columns:
                         value_col = cand
                         break
+
                 if date_col and value_col:
                     for _, row in df.iterrows():
                         d = row[date_col]
@@ -114,10 +145,27 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
                             continue
                         try:
                             d_str = str(d)[:10]
-                            v_dec = float(v) / 100.0  # MD returns % as a number
+                            v_dec = float(v) / 100.0
                             returns.append({"date": d_str, "value": v_dec})
                         except Exception:
                             continue
+                else:
+                    # Try wide format: date columns are ISO-looking strings.
+                    import re as _re
+
+                    iso = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
+                    date_cols = [c for c in df.columns if isinstance(c, str) and iso.match(c)]
+                    if date_cols and len(df) >= 1:
+                        row0 = df.iloc[0]
+                        for c in date_cols:
+                            v = row0[c]
+                            if v is None:
+                                continue
+                            try:
+                                v_dec = float(v) / 100.0
+                                returns.append({"date": c, "value": v_dec})
+                            except Exception:
+                                continue
 
             _send(
                 self,
@@ -126,7 +174,8 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
                     "identifier": {"isin": isin, "ticker": ticker, "secid": secid},
                     "rows": len(returns),
                     "returns": returns,
-                    "schema_columns": list(df.columns) if df is not None else [],
+                    "schema_columns": columns,
+                    "sample_row": sample_row,
                 },
             )
         except Exception as e:
