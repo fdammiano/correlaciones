@@ -263,6 +263,8 @@ export default function UniverseBuilder({
       const data = await res.json();
       const cols: string[] = data.columns;
       const rows: { date: string; values: (number | null)[] }[] = data.rows;
+      const meta = datasets.find((d) => d.id === datasetId);
+      const dsLabel = meta?.label ?? datasetId;
       const newSeries: SeriesData[] = selectedCols.map((col) => {
         const idx = cols.indexOf(col);
         const returns = rows
@@ -270,7 +272,7 @@ export default function UniverseBuilder({
           .filter((p): p is { date: string; value: number } => p.value != null);
         return {
           id: `${datasetId}::${col}`,
-          name: `${datasetId} · ${col}`,
+          name: `${dsLabel} · ${col}`,
           source: "french",
           returns,
         };
@@ -577,16 +579,19 @@ export default function UniverseBuilder({
                 Desactivar todas
               </button>
             </div>
-            <ul className="space-y-1">
+            <ul className="space-y-2">
               {series.map((s) => {
                 const isActive = s.active !== false;
+                const sepIdx = s.name.indexOf(" · ");
+                const dsPart = sepIdx > 0 ? s.name.slice(0, sepIdx) : null;
+                const subPart = sepIdx > 0 ? s.name.slice(sepIdx + 3) : s.name;
                 return (
                   <li key={s.id} className="flex items-start gap-2 text-xs">
                     <input
                       type="checkbox"
                       checked={isActive}
                       onChange={() => onToggleActive(s.id)}
-                      className="mt-0.5"
+                      className="mt-1"
                       title="Incluir en el análisis"
                     />
                     <button
@@ -603,9 +608,14 @@ export default function UniverseBuilder({
                     >
                       ✕
                     </button>
-                    <span className={`flex-1 break-words ${isActive ? "" : "text-zinc-400"}`}>
-                      {s.name}
-                    </span>
+                    <div className={`flex-1 leading-tight ${isActive ? "" : "opacity-50"}`}>
+                      {dsPart && (
+                        <div className="text-[10px] text-zinc-500 break-words">
+                          {dsPart}
+                        </div>
+                      )}
+                      <div className="font-medium break-words">{subPart}</div>
+                    </div>
                   </li>
                 );
               })}
