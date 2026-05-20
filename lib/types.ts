@@ -31,7 +31,11 @@ export type Family =
   | "Size / Momentum"
   | "Size / Dividend Yield"
   | "Size"
+  | "Book-to-Market"
   | "Profitability"
   | "Momentum"
   | "Dividend Yield"
+  | "Investment"
+  | "Earnings/Price"
+  | "Cashflow/Price"
   | "Industry / Sector";

@@ -185,9 +185,13 @@ const REGIONS: Region[] = [
 
 const FAMILIES: Family[] = [
   "Size",
+  "Book-to-Market",
   "Profitability",
   "Momentum",
   "Dividend Yield",
+  "Investment",
+  "Earnings/Price",
+  "Cashflow/Price",
   "Size / Book-to-Market",
   "Size / Profitability",
   "Size / Momentum",

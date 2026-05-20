@@ -7,7 +7,11 @@ export const FRENCH_DATASETS: FrenchDatasetMeta[] = [
   // ===== US =====
   // single-sort
   { id: "Portfolios_Formed_on_ME", region: "US", family: "Size", label: "Portfolios formados por Size (ME)" },
+  { id: "Portfolios_Formed_on_BE-ME", region: "US", family: "Book-to-Market", label: "Portfolios formados por Book-to-Market (BE/ME)" },
   { id: "Portfolios_Formed_on_OP", region: "US", family: "Profitability", label: "Portfolios formados por OP (profitability)" },
+  { id: "Portfolios_Formed_on_INV", region: "US", family: "Investment", label: "Portfolios formados por Investment (asset growth)" },
+  { id: "Portfolios_Formed_on_E-P", region: "US", family: "Earnings/Price", label: "Portfolios formados por Earnings/Price (E/P)" },
+  { id: "Portfolios_Formed_on_CF-P", region: "US", family: "Cashflow/Price", label: "Portfolios formados por Cashflow/Price (CF/P)" },
   { id: "10_Portfolios_Prior_12_2", region: "US", family: "Momentum", label: "10 Portfolios por Momentum (prior 12-2)" },
   { id: "Portfolios_Formed_on_D-P", region: "US", family: "Dividend Yield", label: "Portfolios formados por Dividend Yield (D/P)" },
   // two-sort
