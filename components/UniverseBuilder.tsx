@@ -187,9 +187,11 @@ const FAMILIES: Family[] = [
   "Size",
   "Profitability",
   "Momentum",
+  "Dividend Yield",
   "Size / Book-to-Market",
   "Size / Profitability",
   "Size / Momentum",
+  "Size / Dividend Yield",
   "Industry / Sector",
 ];
 
