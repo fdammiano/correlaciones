@@ -81,6 +81,11 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
             # All the calc* fields determine WHICH of the 36 grouped variants
             # of Monthly Return you get — these match a standard total return
             # in base currency, % units.
+            # Same settings as MS Direct Analytics Lab's "Monthly Return"
+            # (HP010, calculationId=1) — but with calcUse5Days off so the
+            # request isn't silently capped to ~25 years of history. Some
+            # securities (e.g. SPY launched 1993) carry NAV further back
+            # than that and we want to surface it.
             data_points = [
                 {
                     "datapointId": datapoint,
@@ -93,7 +98,7 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
                     "currency": "BASE",
                     "calcCurType": "Return",
                     "calcSdType": "r",
-                    "calcUse5Days": True,
+                    "calcUse5Days": False,
                     "compounding": "0",
                     "annualized": False,
                     "isEpdp": True,
