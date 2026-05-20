@@ -369,7 +369,7 @@ export default function UniverseBuilder({
   }
 
   return (
-    <aside className="w-80 shrink-0 border-r border-zinc-200 bg-zinc-50 p-4 overflow-y-auto h-screen sticky top-0">
+    <aside className="w-96 shrink-0 border-r border-zinc-200 bg-zinc-50 p-4 h-screen sticky top-0 flex flex-col">
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-base font-semibold">Universo</h2>
         {storageBadge && (
@@ -710,7 +710,7 @@ export default function UniverseBuilder({
         <p className="mt-3 text-xs text-red-600 break-words">{error}</p>
       )}
 
-      <div className="mt-5 pt-4 border-t border-zinc-200">
+      <div className="mt-5 pt-4 border-t border-zinc-200 flex-1 min-h-0 flex flex-col">
         {(() => {
           const activeCount = series.filter((s) => s.active !== false).length;
           return (
@@ -745,7 +745,7 @@ export default function UniverseBuilder({
                 Desactivar todas
               </button>
             </div>
-            <ul className="space-y-2">
+            <ul className="space-y-0.5 flex-1 min-h-0 overflow-y-auto pr-1">
               {series.map((s) => {
                 const isActive = s.active !== false;
                 const isHl = s.highlighted === true;
