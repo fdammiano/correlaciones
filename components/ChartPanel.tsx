@@ -164,43 +164,146 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
 }
 
 function WealthChart({ series }: { series: SeriesData[] }) {
+  const [view, setView] = useState<"chart" | "table">("chart");
+  const [order, setOrder] = useState<"desc" | "asc">("desc");
   const common = useMemo(() => commonStartDate(series), [series]);
-  const traces = useMemo(
+
+  const wealthBySeries = useMemo(
     () =>
       series.map((s) => {
         const trimmedReturns = common
           ? s.returns.filter((r) => r.date >= common)
           : s.returns;
         const w = cumulativeWealth(trimmedReturns, 100);
-        return {
-          type: "scatter" as const,
-          mode: "lines" as const,
-          name: s.name,
-          x: w.map((p) => p.date),
-          y: w.map((p) => p.value),
-          hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra>%{fullData.name}</extra>",
-        };
+        return { id: s.id, name: s.name, w };
       }),
     [series, common],
   );
+
+  const traces = useMemo(
+    () =>
+      wealthBySeries.map(({ name, w }) => ({
+        type: "scatter" as const,
+        mode: "lines" as const,
+        name,
+        x: w.map((p) => p.date),
+        y: w.map((p) => p.value),
+        hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra>%{fullData.name}</extra>",
+      })),
+    [wealthBySeries],
+  );
+
   return (
     <>
-      {common && (
-        <p className="text-[11px] text-zinc-500 mb-1">
-          Rebaseo en común desde <b>{common}</b> (primer mes donde todas las series activas tienen dato).
+      <div className="flex items-center justify-between mb-1">
+        <p className="text-[11px] text-zinc-500">
+          {common ? (
+            <>
+              Rebaseo en común desde <b>{common}</b> (primer mes donde todas las series activas tienen dato).
+            </>
+          ) : (
+            "Sin series activas."
+          )}
         </p>
+        <div className="inline-flex rounded border border-zinc-300 overflow-hidden text-[11px]">
+          <button
+            className={`px-2 py-0.5 ${view === "chart" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
+            onClick={() => setView("chart")}
+          >
+            Gráfico
+          </button>
+          <button
+            className={`px-2 py-0.5 ${view === "table" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
+            onClick={() => setView("table")}
+          >
+            Tabla
+          </button>
+        </div>
+      </div>
+      {view === "chart" ? (
+        <PlotlyChart
+          data={traces}
+          layout={{
+            yaxis: { title: "Wealth (base 100)", type: "log" },
+            xaxis: { title: "Fecha" },
+            hovermode: "x unified",
+            legend: { orientation: "h", y: -0.2 },
+          }}
+          height={420}
+        />
+      ) : (
+        <WealthTable wealthBySeries={wealthBySeries} order={order} setOrder={setOrder} />
       )}
-      <PlotlyChart
-        data={traces}
-        layout={{
-          yaxis: { title: "Wealth (base 100)", type: "log" },
-          xaxis: { title: "Fecha" },
-          hovermode: "x unified",
-          legend: { orientation: "h", y: -0.2 },
-        }}
-        height={420}
-      />
     </>
+  );
+}
+
+function WealthTable({
+  wealthBySeries,
+  order,
+  setOrder,
+}: {
+  wealthBySeries: { id: string; name: string; w: { date: string; value: number }[] }[];
+  order: "desc" | "asc";
+  setOrder: (o: "desc" | "asc") => void;
+}) {
+  // Build a unified date axis across all series (union, sorted).
+  const dates = useMemo(() => {
+    const set = new Set<string>();
+    for (const s of wealthBySeries) for (const p of s.w) set.add(p.date);
+    const arr = Array.from(set).sort();
+    return order === "desc" ? arr.slice().reverse() : arr;
+  }, [wealthBySeries, order]);
+
+  const byId = useMemo(() => {
+    const map: Record<string, Map<string, number>> = {};
+    for (const s of wealthBySeries) {
+      map[s.id] = new Map(s.w.map((p) => [p.date, p.value]));
+    }
+    return map;
+  }, [wealthBySeries]);
+
+  return (
+    <div className="border rounded">
+      <div className="flex items-center justify-between px-2 py-1 text-[11px] bg-zinc-50 border-b">
+        <span className="text-zinc-600">{dates.length} meses · base 100</span>
+        <button
+          onClick={() => setOrder(order === "desc" ? "asc" : "desc")}
+          className="text-zinc-600 hover:text-zinc-900 underline"
+        >
+          Orden: {order === "desc" ? "reciente → antiguo" : "antiguo → reciente"}
+        </button>
+      </div>
+      <div className="overflow-auto max-h-[60vh]">
+        <table className="text-[11px] tabular-nums w-full">
+          <thead className="bg-zinc-100 sticky top-0 shadow-[inset_0_-1px_0_rgba(0,0,0,0.05)]">
+            <tr>
+              <th className="px-2 py-1 text-left bg-zinc-100">Fecha</th>
+              {wealthBySeries.map((s) => (
+                <th key={s.id} className="px-2 py-1 text-right whitespace-nowrap bg-zinc-100">
+                  {s.name}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {dates.map((d) => (
+              <tr key={d} className="border-t">
+                <td className="px-2 py-0.5">{d}</td>
+                {wealthBySeries.map((s) => {
+                  const v = byId[s.id].get(d);
+                  return (
+                    <td key={s.id} className="px-2 py-0.5 text-right">
+                      {v == null ? "—" : v.toFixed(2)}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 
