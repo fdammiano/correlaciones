@@ -860,40 +860,54 @@ function ReturnsTable({
   series: SeriesData[];
   aligned: ReturnType<typeof alignSeries>;
 }) {
-  const last24 = aligned.dates.slice(-24);
-  const start = aligned.dates.length - last24.length;
+  const [order, setOrder] = useState<"desc" | "asc">("desc");
+  const dates = useMemo(() => {
+    const idx = aligned.dates.map((d, i) => ({ d, i }));
+    return order === "desc" ? idx.slice().reverse() : idx;
+  }, [aligned.dates, order]);
+
   return (
-    <div className="overflow-x-auto mt-2 border rounded">
-      <table className="text-[11px] tabular-nums">
-        <thead className="bg-zinc-100">
-          <tr>
-            <th className="px-2 py-1 text-left">Fecha</th>
-            {series.map((s) => (
-              <th key={s.id} className="px-2 py-1 text-right whitespace-nowrap">
-                {s.name}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {last24.map((d, idx) => (
-            <tr key={d} className="border-t">
-              <td className="px-2 py-0.5">{d}</td>
-              {series.map((s) => {
-                const v = aligned.byId[s.id][start + idx];
-                return (
-                  <td key={s.id} className="px-2 py-0.5 text-right">
-                    {v == null ? "—" : (v * 100).toFixed(2) + "%"}
-                  </td>
-                );
-              })}
+    <div className="mt-2 border rounded">
+      <div className="flex items-center justify-between px-2 py-1 text-[11px] bg-zinc-50 border-b">
+        <span className="text-zinc-600">
+          {aligned.dates.length} meses · {aligned.dates[0] ?? "—"} → {aligned.dates.at(-1) ?? "—"}
+        </span>
+        <button
+          onClick={() => setOrder((o) => (o === "desc" ? "asc" : "desc"))}
+          className="text-zinc-600 hover:text-zinc-900 underline"
+        >
+          Orden: {order === "desc" ? "reciente → antiguo" : "antiguo → reciente"}
+        </button>
+      </div>
+      <div className="overflow-auto max-h-[60vh]">
+        <table className="text-[11px] tabular-nums w-full">
+          <thead className="bg-zinc-100 sticky top-0 shadow-[inset_0_-1px_0_rgba(0,0,0,0.05)]">
+            <tr>
+              <th className="px-2 py-1 text-left bg-zinc-100">Fecha</th>
+              {series.map((s) => (
+                <th key={s.id} className="px-2 py-1 text-right whitespace-nowrap bg-zinc-100">
+                  {s.name}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="text-[11px] text-zinc-500 p-2">
-        Últimos 24 meses · histórico completo en la API.
-      </p>
+          </thead>
+          <tbody>
+            {dates.map(({ d, i }) => (
+              <tr key={d} className="border-t">
+                <td className="px-2 py-0.5">{d}</td>
+                {series.map((s) => {
+                  const v = aligned.byId[s.id][i];
+                  return (
+                    <td key={s.id} className="px-2 py-0.5 text-right">
+                      {v == null ? "—" : (v * 100).toFixed(2) + "%"}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
