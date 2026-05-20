@@ -43,7 +43,7 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
     <section className="flex-1 p-6 overflow-y-auto h-screen">
       <h1 className="text-xl font-semibold mb-1">Rolling Correlations</h1>
       <p className="text-xs text-zinc-500 mb-4">
-        Ken French portfolios + Yahoo Finance · retornos mensuales
+        Fama French portfolios · retornos mensuales
       </p>
 
       <div className="flex flex-wrap gap-3 items-end mb-5 text-sm">

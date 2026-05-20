@@ -242,7 +242,7 @@ export default function UniverseBuilder({
     fetch("/api/french/list")
       .then((r) => r.json())
       .then((d) => setDatasets(d.datasets ?? []))
-      .catch(() => setError("No pude cargar la lista de Ken French."));
+      .catch(() => setError("No pude cargar la lista de Fama French."));
   }, []);
 
   const filtered = useMemo(
@@ -391,7 +391,7 @@ export default function UniverseBuilder({
           className={`px-3 py-1.5 ${tab === "french" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
           onClick={() => setTab("french")}
         >
-          Ken French
+          Fama French
         </button>
         <button
           className={`px-3 py-1.5 ${tab === "ms" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
