@@ -202,6 +202,8 @@ type Props = {
   onClear: () => void;
   onToggleActive: (id: string) => void;
   onSetAllActive: (active: boolean) => void;
+  onToggleHighlight: (id: string) => void;
+  onReorder: (draggedId: string, targetId: string) => void;
   storageBadge?: string;
 };
 
@@ -212,8 +214,12 @@ export default function UniverseBuilder({
   onClear,
   onToggleActive,
   onSetAllActive,
+  onToggleHighlight,
+  onReorder,
   storageBadge,
 }: Props) {
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
   const [tab, setTab] = useState<"french" | "ms" | "paste" | "op">("french");
   const [pasteName, setPasteName] = useState("SPY");
   // operation builder state
@@ -742,13 +748,51 @@ export default function UniverseBuilder({
             <ul className="space-y-2">
               {series.map((s) => {
                 const isActive = s.active !== false;
+                const isHl = s.highlighted === true;
                 const sepIdx = s.name.indexOf(" · ");
                 const dsPart = sepIdx > 0 ? s.name.slice(0, sepIdx) : null;
                 const subPart = sepIdx > 0 ? s.name.slice(sepIdx + 3) : s.name;
                 const positions =
                   s.source === "french" ? prettifyKenFrenchCol(subPart) : [subPart];
+                const isDragOver = overId === s.id && dragId && dragId !== s.id;
                 return (
-                  <li key={s.id} className="flex items-start gap-2 text-xs">
+                  <li
+                    key={s.id}
+                    draggable
+                    onDragStart={(e) => {
+                      setDragId(s.id);
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData("text/plain", s.id);
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      if (dragId && dragId !== s.id) setOverId(s.id);
+                    }}
+                    onDragLeave={() => {
+                      if (overId === s.id) setOverId(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (dragId && dragId !== s.id) onReorder(dragId, s.id);
+                      setDragId(null);
+                      setOverId(null);
+                    }}
+                    onDragEnd={() => {
+                      setDragId(null);
+                      setOverId(null);
+                    }}
+                    className={`flex items-start gap-1.5 text-xs px-1 py-0.5 rounded transition-colors ${
+                      isHl ? "bg-amber-50 border-l-2 border-amber-400 pl-1.5" : ""
+                    } ${dragId === s.id ? "opacity-40" : ""} ${
+                      isDragOver ? "border-t-2 border-zinc-900" : ""
+                    }`}
+                  >
+                    <span
+                      className="cursor-grab active:cursor-grabbing text-zinc-300 hover:text-zinc-500 mt-0.5 select-none"
+                      title="Arrastrar para reordenar"
+                    >
+                      ⋮⋮
+                    </span>
                     <input
                       type="checkbox"
                       checked={isActive}
@@ -756,6 +800,13 @@ export default function UniverseBuilder({
                       className="mt-1"
                       title="Incluir en el análisis"
                     />
+                    <button
+                      onClick={() => onToggleHighlight(s.id)}
+                      className={`mt-0.5 ${isHl ? "text-amber-500" : "text-zinc-300 hover:text-amber-500"}`}
+                      title={isHl ? "Quitar destaque" : "Destacar"}
+                    >
+                      {isHl ? "★" : "☆"}
+                    </button>
                     <button
                       onClick={() => downloadSeriesCSV(s)}
                       className="text-zinc-400 hover:text-zinc-900 mt-0.5"

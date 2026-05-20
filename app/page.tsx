@@ -101,6 +101,22 @@ export default function Home() {
   function setAllActive(active: boolean) {
     setSeries((prev) => prev.map((s) => ({ ...s, active })));
   }
+  function toggleHighlight(id: string) {
+    setSeries((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, highlighted: !s.highlighted } : s)),
+    );
+  }
+  function reorder(draggedId: string, targetId: string) {
+    setSeries((prev) => {
+      const i = prev.findIndex((s) => s.id === draggedId);
+      const j = prev.findIndex((s) => s.id === targetId);
+      if (i < 0 || j < 0 || i === j) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(i, 1);
+      next.splice(j, 0, moved);
+      return next;
+    });
+  }
 
   const activeSeries = useMemo(
     () => series.filter((s) => s.active !== false),
@@ -116,6 +132,8 @@ export default function Home() {
         onClear={() => setSeries([])}
         onToggleActive={toggleActive}
         onSetAllActive={setAllActive}
+        onToggleHighlight={toggleHighlight}
+        onReorder={reorder}
         storageBadge={
           hydrated
             ? serverConfigured
