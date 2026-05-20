@@ -363,10 +363,11 @@ function OneVsMany({
   const lastTable = others.map((s) => {
     const o = aligned.byId[s.id] ?? [];
     const slice = (arr: (number | null)[]) => arr.slice(-window);
-    const c = correlation(slice(bArr), slice(o));
-    return { name: s.name, id: s.id, last: c };
+    const cLast = correlation(slice(bArr), slice(o));
+    const cFull = correlation(bArr, o);
+    return { name: s.name, id: s.id, last: cLast, full: cFull };
   });
-  lastTable.sort((a, b) => (b.last ?? -2) - (a.last ?? -2));
+  lastTable.sort((a, b) => (b.full ?? -2) - (a.full ?? -2));
 
   const benchmarkSeries = series.find((s) => s.id === benchmark);
 
@@ -404,6 +405,7 @@ function OneVsMany({
           <thead className="bg-zinc-100">
             <tr>
               <th className="text-left px-3 py-1.5">Serie</th>
+              <th className="text-right px-3 py-1.5">ρ histórico (todo)</th>
               <th className="text-right px-3 py-1.5">ρ últimos {window}m</th>
               <th className="w-12"></th>
             </tr>
@@ -412,6 +414,9 @@ function OneVsMany({
             {lastTable.map((r) => (
               <tr key={r.id} className="border-t">
                 <td className="px-3 py-1">{r.name}</td>
+                <td className="px-3 py-1 text-right tabular-nums">
+                  {r.full == null ? "—" : r.full.toFixed(3)}
+                </td>
                 <td className="px-3 py-1 text-right tabular-nums">
                   {r.last == null ? "—" : r.last.toFixed(3)}
                 </td>
@@ -811,6 +816,7 @@ function PearsonRolling({
   const avg = validRc.length ? validRc.reduce((s, v) => s + v, 0) / validRc.length : null;
   const min = validRc.length ? Math.min(...validRc) : null;
   const max = validRc.length ? Math.max(...validRc) : null;
+  const full = correlation(arrA, arrB);
 
   return (
     <>
@@ -832,7 +838,8 @@ function PearsonRolling({
         }}
         height={500}
       />
-      <div className="grid grid-cols-4 gap-3 text-sm">
+      <div className="grid grid-cols-5 gap-3 text-sm">
+        <Metric label="ρ histórico (todo)" value={full} />
         <Metric label="ρ última" value={last} />
         <Metric label="ρ promedio" value={avg} />
         <Metric label="ρ mínima" value={min} />
