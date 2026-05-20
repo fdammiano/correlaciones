@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FrenchDatasetMeta, SeriesData, Region, Family, ReturnPoint } from "@/lib/types";
 import { downloadAllSeriesCSV, downloadSeriesCSV } from "@/lib/download";
+import { defaultOpName, operate, type OpType } from "@/lib/operations";
 
 function monthEndISO(y: number, m: number): string | null {
   if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12 || y < 1900 || y > 2100) {
@@ -211,8 +212,16 @@ export default function UniverseBuilder({
   onSetAllActive,
   storageBadge,
 }: Props) {
-  const [tab, setTab] = useState<"french" | "ms" | "paste">("french");
+  const [tab, setTab] = useState<"french" | "ms" | "paste" | "op">("french");
   const [pasteName, setPasteName] = useState("SPY");
+  // operation builder state
+  const [opType, setOpType] = useState<OpType>("diff");
+  const [opAId, setOpAId] = useState<string>("");
+  const [opBId, setOpBId] = useState<string>("");
+  const [opWeight, setOpWeight] = useState<number>(0.5);
+  const [opScalar, setOpScalar] = useState<number>(1);
+  const [opOffsetPct, setOpOffsetPct] = useState<number>(0); // user types in %, converted to decimal
+  const [opName, setOpName] = useState<string>("");
   const [msIdType, setMsIdType] = useState<"isin" | "ticker" | "secid">("isin");
   const [msIdValue, setMsIdValue] = useState("");
   const [msName, setMsName] = useState("");
@@ -395,6 +404,12 @@ export default function UniverseBuilder({
           onClick={() => setTab("paste")}
         >
           Excel
+        </button>
+        <button
+          className={`px-3 py-1.5 ${tab === "op" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
+          onClick={() => setTab("op")}
+        >
+          Operar
         </button>
       </div>
 
@@ -658,6 +673,31 @@ export default function UniverseBuilder({
         </div>
       )}
 
+      {tab === "op" && (
+        <OperationBuilder
+          allSeries={series}
+          opType={opType}
+          setOpType={setOpType}
+          opAId={opAId}
+          setOpAId={setOpAId}
+          opBId={opBId}
+          setOpBId={setOpBId}
+          opWeight={opWeight}
+          setOpWeight={setOpWeight}
+          opScalar={opScalar}
+          setOpScalar={setOpScalar}
+          opOffsetPct={opOffsetPct}
+          setOpOffsetPct={setOpOffsetPct}
+          opName={opName}
+          setOpName={setOpName}
+          onCreate={(s) => {
+            onAdd([s]);
+            setOpName("");
+          }}
+          onError={setError}
+        />
+      )}
+
       {error && (
         <p className="mt-3 text-xs text-red-600 break-words">{error}</p>
       )}
@@ -765,5 +805,214 @@ export default function UniverseBuilder({
         )}
       </div>
     </aside>
+  );
+}
+
+function OperationBuilder({
+  allSeries,
+  opType,
+  setOpType,
+  opAId,
+  setOpAId,
+  opBId,
+  setOpBId,
+  opWeight,
+  setOpWeight,
+  opScalar,
+  setOpScalar,
+  opOffsetPct,
+  setOpOffsetPct,
+  opName,
+  setOpName,
+  onCreate,
+  onError,
+}: {
+  allSeries: SeriesData[];
+  opType: OpType;
+  setOpType: (v: OpType) => void;
+  opAId: string;
+  setOpAId: (v: string) => void;
+  opBId: string;
+  setOpBId: (v: string) => void;
+  opWeight: number;
+  setOpWeight: (v: number) => void;
+  opScalar: number;
+  setOpScalar: (v: number) => void;
+  opOffsetPct: number;
+  setOpOffsetPct: (v: number) => void;
+  opName: string;
+  setOpName: (v: string) => void;
+  onCreate: (s: SeriesData) => void;
+  onError: (msg: string | null) => void;
+}) {
+  const needsB = opType !== "scale";
+
+  const a = allSeries.find((s) => s.id === opAId) ?? allSeries[0];
+  const b = needsB
+    ? allSeries.find((s) => s.id === opBId && s.id !== a?.id) ??
+      allSeries.find((s) => s.id !== a?.id)
+    : undefined;
+
+  const auto = useMemo(() => {
+    if (!a) return "";
+    return defaultOpName({
+      type: opType,
+      a,
+      b,
+      weight: opWeight,
+      scalar: opScalar,
+      offset: opOffsetPct / 100,
+    });
+  }, [a, b, opType, opWeight, opScalar, opOffsetPct]);
+
+  const symbol: Record<OpType, string> = {
+    diff: "A − B",
+    ratio: "A / B (wealth)",
+    sum: "A + B",
+    weighted: "w·A + (1−w)·B",
+    scale: "c·A + offset",
+  };
+
+  return (
+    <div className="space-y-3 text-sm">
+      <div>
+        <label className="block text-xs text-zinc-600 mb-1">Operación</label>
+        <select
+          value={opType}
+          onChange={(e) => setOpType(e.target.value as OpType)}
+          className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
+        >
+          {(Object.keys(symbol) as OpType[]).map((k) => (
+            <option key={k} value={k}>
+              {k === "diff" && "Diferencia (A − B)"}
+              {k === "ratio" && "Ratio wealth (A / B)"}
+              {k === "sum" && "Suma (A + B)"}
+              {k === "weighted" && "Combinación ponderada"}
+              {k === "scale" && "Escala (c·A + offset)"}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div>
+        <label className="block text-xs text-zinc-600 mb-1">Serie A</label>
+        <select
+          value={a?.id ?? ""}
+          onChange={(e) => setOpAId(e.target.value)}
+          className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
+        >
+          {allSeries.length === 0 && <option value="">(sin series)</option>}
+          {allSeries.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+      </div>
+
+      {needsB && (
+        <div>
+          <label className="block text-xs text-zinc-600 mb-1">Serie B</label>
+          <select
+            value={b?.id ?? ""}
+            onChange={(e) => setOpBId(e.target.value)}
+            className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
+          >
+            {allSeries
+              .filter((s) => s.id !== a?.id)
+              .map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+          </select>
+        </div>
+      )}
+
+      {opType === "weighted" && (
+        <div>
+          <label className="block text-xs text-zinc-600 mb-1">
+            Peso de A: {(opWeight * 100).toFixed(0)}% · Peso de B: {((1 - opWeight) * 100).toFixed(0)}%
+          </label>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={opWeight}
+            onChange={(e) => setOpWeight(Number(e.target.value))}
+            className="w-full"
+          />
+        </div>
+      )}
+
+      {opType === "scale" && (
+        <div className="flex gap-2">
+          <div className="flex-1">
+            <label className="block text-xs text-zinc-600 mb-1">Multiplicador (c)</label>
+            <input
+              type="number"
+              step={0.1}
+              value={opScalar}
+              onChange={(e) => setOpScalar(Number(e.target.value))}
+              className="w-full border border-zinc-300 rounded px-2 py-1 bg-white text-right tabular-nums"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="block text-xs text-zinc-600 mb-1">Offset (% mensual)</label>
+            <input
+              type="number"
+              step={0.05}
+              value={opOffsetPct}
+              onChange={(e) => setOpOffsetPct(Number(e.target.value))}
+              className="w-full border border-zinc-300 rounded px-2 py-1 bg-white text-right tabular-nums"
+            />
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label className="block text-xs text-zinc-600 mb-1">Nombre nuevo</label>
+        <input
+          value={opName || auto}
+          onChange={(e) => setOpName(e.target.value)}
+          className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
+          placeholder={auto || "Nombre"}
+        />
+      </div>
+
+      <button
+        disabled={!a || (needsB && !b)}
+        onClick={() => {
+          if (!a) return;
+          if (needsB && !b) return;
+          const returns = operate({
+            type: opType,
+            a,
+            b,
+            weight: opWeight,
+            scalar: opScalar,
+            offset: opOffsetPct / 100,
+          });
+          if (returns.length === 0) {
+            onError("Sin meses en común para esta operación.");
+            return;
+          }
+          onError(null);
+          const name = (opName || auto).trim() || "Custom op";
+          onCreate({
+            id: `op::${name}::${Date.now()}`,
+            name,
+            source: "custom",
+            returns,
+            active: true,
+          });
+        }}
+        className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded disabled:opacity-40"
+      >
+        Crear serie derivada
+      </button>
+
+      <p className="text-[11px] text-zinc-500">
+        Las operaciones se aplican mes por mes sobre el período en común. La serie nueva
+        se guarda como cualquier otra y se sincroniza al server compartido.
+      </p>
+    </div>
   );
 }
