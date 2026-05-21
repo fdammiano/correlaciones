@@ -922,12 +922,24 @@ function OperationBuilder({
     });
   }, [a, b, opType, opWeight, opScalar, opOffsetPct]);
 
-  const symbol: Record<OpType, string> = {
-    diff: "A − B",
-    ratio: "A / B (wealth)",
-    sum: "A + B",
-    weighted: "w·A + (1−w)·B",
-    scale: "c·A + offset",
+  const opLabel: Record<OpType, string> = {
+    diff: "Diferencia · r_A − r_B",
+    ratio: "Ratio wealth · (1+r_A)/(1+r_B) − 1",
+    sum: "Suma · r_A + r_B",
+    weighted: "Combinación ponderada · w·r_A + (1−w)·r_B",
+    scale: "Escala · c·r_A + offset",
+  };
+
+  const opDescription: Record<OpType, string> = {
+    diff:
+      "Resta directa de retornos mes a mes. Es lo que define los factores académicos tipo SMB, HML, MOM. Equivale al P&L de un portafolio long $1 en A, short $1 en B rebalanceado cada mes.",
+    ratio:
+      "Calcula (1 + r_A) / (1 + r_B) − 1 para cada mes. NO es una resta — es la tasa de crecimiento del ratio de wealth A/B. Si acumulás esta serie, te queda exactamente Wealth_A(t) / Wealth_B(t). Útil para ver outperformance limpia.",
+    sum: "Suma simple de los dos retornos. Equivale a un portafolio largo $1 en A más largo $1 en B (notional total $2, no rebalanceado).",
+    weighted:
+      "Promedio ponderado de los dos retornos con peso fijo w en A y (1−w) en B. Es un portafolio de pesos constantes rebalanceado cada mes.",
+    scale:
+      "Multiplica r_A por la constante c y le suma un offset fijo (en decimal mensual). Sirve para apalancar (c>1), des-apalancar (0<c<1) o restar un piso de rendimiento.",
   };
 
   return (
@@ -939,16 +951,15 @@ function OperationBuilder({
           onChange={(e) => setOpType(e.target.value as OpType)}
           className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
         >
-          {(Object.keys(symbol) as OpType[]).map((k) => (
+          {(Object.keys(opLabel) as OpType[]).map((k) => (
             <option key={k} value={k}>
-              {k === "diff" && "Diferencia (A − B)"}
-              {k === "ratio" && "Ratio wealth (A / B)"}
-              {k === "sum" && "Suma (A + B)"}
-              {k === "weighted" && "Combinación ponderada"}
-              {k === "scale" && "Escala (c·A + offset)"}
+              {opLabel[k]}
             </option>
           ))}
         </select>
+        <p className="text-[11px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded p-2 mt-1.5 leading-relaxed">
+          {opDescription[opType]}
+        </p>
       </div>
 
       <div>
