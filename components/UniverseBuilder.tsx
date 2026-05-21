@@ -814,7 +814,7 @@ export default function UniverseBuilder({
                     <button
                       onClick={() => downloadSeriesCSV(s)}
                       className="text-zinc-400 hover:text-zinc-900 mt-0.5"
-                      title="Descargar CSV"
+                      title="Descargar Excel (.xlsx)"
                     >
                       ⬇
                     </button>
@@ -856,7 +856,7 @@ export default function UniverseBuilder({
               disabled={series.filter((s) => s.active !== false).length === 0}
               className="mt-3 w-full bg-zinc-100 hover:bg-zinc-200 text-zinc-900 text-xs py-1.5 rounded border border-zinc-300 disabled:opacity-40"
             >
-              ⬇ Descargar activas combinadas (CSV)
+              ⬇ Descargar activas combinadas (Excel)
             </button>
           </>
         )}
