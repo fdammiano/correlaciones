@@ -236,6 +236,7 @@ export default function UniverseBuilder({
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [librarySearch, setLibrarySearch] = useState("");
+  const [showInactive, setShowInactive] = useState(true);
   const [tab, setTab] = useState<"french" | "ms" | "paste" | "op">("french");
   const [pasteName, setPasteName] = useState("SPY");
   // operation builder state
@@ -785,14 +786,8 @@ export default function UniverseBuilder({
                 Desactivar todas
               </button>
             </div>
-            <ul className="space-y-0.5 flex-1 min-h-0 overflow-y-auto pr-1">
-              {series
-                .filter((s) =>
-                  librarySearch.trim()
-                    ? s.name.toLowerCase().includes(librarySearch.trim().toLowerCase())
-                    : true,
-                )
-                .map((s) => {
+            {(() => {
+              const renderRow = (s: SeriesData) => {
                 const isActive = s.active !== false;
                 const isHl = s.highlighted === true;
                 const sepIdx = s.name.indexOf(" · ");
@@ -899,8 +894,47 @@ export default function UniverseBuilder({
                     </div>
                   </li>
                 );
-              })}
-            </ul>
+              };
+
+              const matchesSearch = (s: SeriesData) =>
+                librarySearch.trim()
+                  ? s.name.toLowerCase().includes(librarySearch.trim().toLowerCase())
+                  : true;
+              const filtered = series.filter(matchesSearch);
+              const activeRows = filtered.filter((s) => s.active !== false);
+              const inactiveRows = filtered.filter((s) => s.active === false);
+
+              return (
+                <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+                  <div className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded px-1.5 py-1 mb-1 mt-1 sticky top-0 z-10 border border-emerald-200">
+                    ✓ En análisis ({activeRows.length})
+                  </div>
+                  {activeRows.length === 0 ? (
+                    <p className="text-[11px] text-zinc-500 px-1 py-1 italic">
+                      Ninguna serie tildada. Activá una abajo o agregá nuevas.
+                    </p>
+                  ) : (
+                    <ul className="space-y-0.5 mb-3">{activeRows.map(renderRow)}</ul>
+                  )}
+
+                  <div
+                    className="text-[11px] font-semibold text-zinc-600 bg-zinc-100 rounded px-1.5 py-1 mb-1 flex items-center justify-between cursor-pointer hover:bg-zinc-200 sticky top-0 z-10 border border-zinc-200"
+                    onClick={() => setShowInactive(!showInactive)}
+                  >
+                    <span>○ Disponibles ({inactiveRows.length})</span>
+                    <span className="text-zinc-500">{showInactive ? "▾" : "▸"}</span>
+                  </div>
+                  {showInactive && inactiveRows.length > 0 && (
+                    <ul className="space-y-0.5">{inactiveRows.map(renderRow)}</ul>
+                  )}
+                  {showInactive && inactiveRows.length === 0 && (
+                    <p className="text-[11px] text-zinc-500 px-1 py-1 italic">
+                      Todas las series están activas.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
             <button
               onClick={() => downloadAllSeriesCSV(series.filter((s) => s.active !== false))}
               disabled={series.filter((s) => s.active !== false).length === 0}
