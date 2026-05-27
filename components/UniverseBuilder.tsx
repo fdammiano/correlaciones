@@ -65,6 +65,17 @@ function parseNumber(raw: string, fmt: DecimalFormat): number {
   return sign * parseFloat(s);
 }
 
+// Source badge color/label so the user can see at a glance where each
+// series comes from.
+function sourceBadge(s: SeriesData): { label: string; cls: string } {
+  if (s.source === "french") return { label: "FF", cls: "bg-blue-100 text-blue-800" };
+  if (s.source === "yahoo") return { label: "YF", cls: "bg-rose-100 text-rose-800" };
+  if (s.id.startsWith("ms::")) return { label: "MS", cls: "bg-emerald-100 text-emerald-800" };
+  if (s.id.startsWith("op::")) return { label: "Op", cls: "bg-orange-100 text-orange-800" };
+  if (s.id.startsWith("paste::")) return { label: "Excel", cls: "bg-purple-100 text-purple-800" };
+  return { label: "—", cls: "bg-zinc-100 text-zinc-600" };
+}
+
 // Convert cryptic Ken French column names into a human-readable position.
 // Returns an array of "position labels" (1 for single-sort, 2 for bivariate
 // 6_Portfolios datasets) so the sidebar can stack them visually.
@@ -224,6 +235,7 @@ export default function UniverseBuilder({
 }: Props) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
+  const [librarySearch, setLibrarySearch] = useState("");
   const [tab, setTab] = useState<"french" | "ms" | "paste" | "op">("french");
   const [pasteName, setPasteName] = useState("SPY");
   // operation builder state
@@ -717,23 +729,47 @@ export default function UniverseBuilder({
       <div className="mt-5 pt-4 border-t border-zinc-200 flex-1 min-h-0 flex flex-col">
         {(() => {
           const activeCount = series.filter((s) => s.active !== false).length;
+          // tally by source for the subline
+          const tally: Record<string, number> = {};
+          for (const s of series) {
+            const b = sourceBadge(s).label;
+            tally[b] = (tally[b] ?? 0) + 1;
+          }
+          const tallyStr = Object.entries(tally)
+            .map(([k, n]) => `${n} ${k}`)
+            .join(" · ");
           return (
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-semibold">
-                Biblioteca ({activeCount}/{series.length})
-              </h3>
+            <>
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold">Biblioteca</h3>
+                {series.length > 0 && (
+                  <button onClick={onClear} className="text-xs text-zinc-500 hover:text-red-600">
+                    Borrar todo
+                  </button>
+                )}
+              </div>
               {series.length > 0 && (
-                <button onClick={onClear} className="text-xs text-zinc-500 hover:text-red-600">
-                  Borrar todo
-                </button>
+                <div className="text-[11px] text-zinc-500 mb-2">
+                  <span className="font-semibold text-zinc-700">{activeCount}</span>
+                  <span> activas de </span>
+                  <span className="font-semibold text-zinc-700">{series.length}</span>
+                  {tallyStr && <span> · {tallyStr}</span>}
+                </div>
               )}
-            </div>
+            </>
           );
         })()}
         {series.length === 0 ? (
           <p className="text-xs text-zinc-500">Vacío — agregá series arriba.</p>
         ) : (
           <>
+            <input
+              type="search"
+              value={librarySearch}
+              onChange={(e) => setLibrarySearch(e.target.value)}
+              placeholder="🔍 Filtrar serie…"
+              className="w-full border border-zinc-300 rounded px-2 py-1 mb-2 text-xs bg-white"
+            />
             <div className="flex gap-2 mb-2 text-[11px]">
               <button
                 onClick={() => onSetAllActive(true)}
@@ -750,7 +786,13 @@ export default function UniverseBuilder({
               </button>
             </div>
             <ul className="space-y-0.5 flex-1 min-h-0 overflow-y-auto pr-1">
-              {series.map((s) => {
+              {series
+                .filter((s) =>
+                  librarySearch.trim()
+                    ? s.name.toLowerCase().includes(librarySearch.trim().toLowerCase())
+                    : true,
+                )
+                .map((s) => {
                 const isActive = s.active !== false;
                 const isHl = s.highlighted === true;
                 const sepIdx = s.name.indexOf(" · ");
@@ -826,11 +868,19 @@ export default function UniverseBuilder({
                       ✕
                     </button>
                     <div className={`flex-1 leading-tight ${isActive ? "" : "opacity-50"}`}>
-                      {dsPart && (
-                        <div className="text-[10px] text-zinc-500 break-words">
-                          {dsPart}
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1 flex-wrap">
+                        <span
+                          className={`text-[9px] font-mono font-semibold px-1 py-px rounded ${sourceBadge(s).cls}`}
+                          title="Fuente"
+                        >
+                          {sourceBadge(s).label}
+                        </span>
+                        {dsPart && (
+                          <span className="text-[10px] text-zinc-500 break-words">
+                            {dsPart}
+                          </span>
+                        )}
+                      </div>
                       {positions.length === 2 ? (
                         <div className="flex items-baseline gap-1.5 break-words">
                           <span className="font-medium">{positions[0]}</span>
