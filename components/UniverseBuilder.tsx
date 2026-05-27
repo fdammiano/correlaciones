@@ -1016,14 +1016,14 @@ function OperationBuilder({
 
   const opDescription: Record<OpType, string> = {
     diff:
-      "Resta directa de retornos mes a mes. Es lo que define los factores académicos tipo SMB, HML, MOM. Equivale al P&L de un portafolio long $1 en A, short $1 en B rebalanceado cada mes.",
+      "Resta directa de retornos mes a mes: r_A − r_B. Es lo que define los factores académicos tipo SMB, HML, MOM. Equivale al P&L de un portafolio long $1 en A, short $1 en B rebalanceado cada mes.",
     ratio:
-      "Calcula (1 + r_A) / (1 + r_B) − 1 para cada mes. NO es una resta — es la tasa de crecimiento del ratio de wealth A/B. Si acumulás esta serie, te queda exactamente Wealth_A(t) / Wealth_B(t). Útil para ver outperformance limpia.",
+      "Es la versión 'compuesta' de la resta: en lugar de hacer r_A − r_B directo (que ignora el efecto compounding), calcula (1+r_A)/(1+r_B) − 1 cada mes. Acumulado en el tiempo te da EXACTAMENTE Wealth_A(t) / Wealth_B(t), o sea cuánto más vale A vs B en patrimonio acumulado. Para retornos chicos (<5%/mes) casi no se nota la diferencia con la resta simple; para meses con movimientos grandes sí importa.",
     sum: "Suma simple de los dos retornos. Equivale a un portafolio largo $1 en A más largo $1 en B (notional total $2, no rebalanceado).",
     weighted:
       "Promedio ponderado de los dos retornos con peso fijo w en A y (1−w) en B. Es un portafolio de pesos constantes rebalanceado cada mes.",
     scale:
-      "Multiplica r_A por la constante c y le suma un offset fijo (en decimal mensual). Sirve para apalancar (c>1), des-apalancar (0<c<1) o restar un piso de rendimiento.",
+      "Transforma la serie A multiplicándola por c y sumándole un offset mensual fijo. Usos típicos: c=2 simula leverage 2x · c=0.5 des-apalanca a la mitad · c=−1 invierte el signo (útil para 'short' lógico) · offset=−0.003 resta ~3.75% anual (rf) para obtener excess return. Combinaciones: c=1.5 + offset=−0.001 = leverage con costo de funding, etc.",
   };
 
   return (
