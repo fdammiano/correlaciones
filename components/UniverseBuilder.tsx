@@ -236,7 +236,7 @@ export default function UniverseBuilder({
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [librarySearch, setLibrarySearch] = useState("");
-  const [showInactive, setShowInactive] = useState(true);
+  const [showInactive, setShowInactive] = useState(false);
   const [tab, setTab] = useState<"french" | "ms" | "paste" | "op">("french");
   const [pasteName, setPasteName] = useState("SPY");
   // operation builder state
