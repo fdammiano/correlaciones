@@ -48,9 +48,24 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
             end_date = datetime.utcnow().strftime("%Y-%m-%d")
             datapoint = "HP010"
 
-            token = os.environ.get("MD_AUTH_TOKEN")
+            # Accept the token under either name — MD_AUTH_TOKEN is the
+            # canonical one we read; "Authenticator" is also supported
+            # because that's how Morningstar Direct labels it in some flows
+            # and the user may add it under that name in Vercel.
+            token = (
+                os.environ.get("MD_AUTH_TOKEN")
+                or os.environ.get("Authenticator")
+                or os.environ.get("AUTHENTICATOR")
+            )
             if not token:
-                _send(self, {"error": "MD_AUTH_TOKEN no está configurado en Vercel."}, 503)
+                _send(
+                    self,
+                    {
+                        "error": "Token de Morningstar no configurado. Agregalo en "
+                        "Vercel como MD_AUTH_TOKEN o Authenticator."
+                    },
+                    503,
+                )
                 return
 
             try:
