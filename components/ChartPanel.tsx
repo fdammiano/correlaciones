@@ -226,6 +226,15 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
           <ReturnsTable series={series} aligned={aligned} />
         </details>
       </div>
+
+      {series.length > 0 && (
+        <div className="mt-4">
+          <details className="text-xs">
+            <summary className="cursor-pointer text-zinc-500">Ver gráfico de drawdown (underwater)</summary>
+            <DrawdownPanel series={series} />
+          </details>
+        </div>
+      )}
     </section>
   );
 }
@@ -1258,6 +1267,79 @@ function MatrixView({ series, lastN }: { series: SeriesData[]; lastN: number | "
       }}
       height={Math.max(500, 40 * names.length + 200)}
     />
+  );
+}
+
+function DrawdownPanel({ series }: { series: SeriesData[] }) {
+  const { traces, maxDD } = useMemo(() => {
+    const traces: any[] = [];
+    const maxDD: { name: string; dd: number; date: string | null }[] = [];
+    series.forEach((s, i) => {
+      const sorted = [...s.returns]
+        .filter((r) => Number.isFinite(r.value))
+        .sort((a, b) => a.date.localeCompare(b.date));
+      const color = PALETTE[i % PALETTE.length];
+      let wealth = 1;
+      let peak = 1;
+      let worst = 0;
+      let worstDate: string | null = null;
+      const x: string[] = [];
+      const y: number[] = [];
+      for (const r of sorted) {
+        wealth *= 1 + r.value;
+        if (wealth > peak) peak = wealth;
+        const dd = wealth / peak - 1;
+        x.push(r.date);
+        y.push(dd * 100);
+        if (dd < worst) {
+          worst = dd;
+          worstDate = r.date;
+        }
+      }
+      traces.push({
+        type: "scatter" as const,
+        mode: "lines" as const,
+        name: s.name,
+        x,
+        y,
+        line: { color, width: 1.5 },
+        hovertemplate: "%{x|%Y-%m} · %{y:.2f}%<extra>%{fullData.name}</extra>",
+      });
+      maxDD.push({ name: s.name, dd: worst * 100, date: worstDate });
+    });
+    return { traces, maxDD };
+  }, [series]);
+
+  return (
+    <div className="mt-2">
+      <PlotlyChart
+        data={traces}
+        layout={{
+          title: "Drawdown (underwater)",
+          yaxis: { title: "Caída desde el máximo", ticksuffix: "%", rangemode: "tozero" },
+          xaxis: { title: "Fecha" },
+          hovermode: "x unified",
+          legend: { orientation: "h", y: -0.2 },
+        }}
+        height={380}
+      />
+      <p className="text-[11px] text-zinc-500 mt-1">
+        Drawdown = caída acumulada desde el máximo previo (pico → valle) en cada momento, sobre la
+        historia completa de cada serie. El mínimo de cada línea es el <b>Max DD</b> que aparece en la
+        tabla de métricas.
+      </p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2">
+        {maxDD.map((m) => (
+          <div key={m.name} className="border rounded p-2 bg-zinc-50">
+            <div className="text-[10px] text-zinc-500 truncate" title={m.name}>{m.name}</div>
+            <div className="text-sm font-semibold tabular-nums text-red-700">
+              {m.dd.toFixed(2)}%
+            </div>
+            <div className="text-[10px] text-zinc-400">{m.date ? `valle ${m.date}` : "—"}</div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
