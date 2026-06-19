@@ -62,6 +62,50 @@ export function operate(cfg: OpConfig): ReturnPoint[] {
   return out;
 }
 
+export type PortfolioMember = { series: SeriesData; weight: number };
+
+/**
+ * Cartera de N activos con pesos fijos, rebalanceada cada mes:
+ *   r_port(t) = Σ wᵢ·rᵢ(t)   con los pesos normalizados a que sumen 1.
+ * Se calcula sobre los meses en común a TODOS los miembros con peso ≠ 0
+ * (intersección de historias). Así el backtest arranca en la inception más tardía.
+ */
+export function portfolioReturns(members: PortfolioMember[]): ReturnPoint[] {
+  const valid = members.filter((m) => m.weight !== 0 && m.series.returns.length > 0);
+  if (valid.length === 0) return [];
+  const totalW = valid.reduce((s, m) => s + m.weight, 0);
+  if (totalW === 0) return [];
+
+  const maps = valid.map((m) => ({
+    w: m.weight / totalW,
+    map: new Map(m.series.returns.map((r) => [r.date, r.value])),
+  }));
+
+  // Intersección de fechas entre todos los miembros.
+  let dates = Array.from(maps[0].map.keys());
+  for (let i = 1; i < maps.length; i++) {
+    const mk = maps[i].map;
+    dates = dates.filter((d) => mk.has(d));
+  }
+  dates.sort();
+
+  const out: ReturnPoint[] = [];
+  for (const d of dates) {
+    let v = 0;
+    let ok = true;
+    for (const { w, map } of maps) {
+      const r = map.get(d);
+      if (r == null || !Number.isFinite(r)) {
+        ok = false;
+        break;
+      }
+      v += w * r;
+    }
+    if (ok && Number.isFinite(v)) out.push({ date: d, value: v });
+  }
+  return out;
+}
+
 export function defaultOpName(cfg: OpConfig): string {
   const a = cfg.a.name;
   const b = cfg.b?.name ?? "";

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FrenchDatasetMeta, SeriesData, Region, Family, ReturnPoint } from "@/lib/types";
 import { downloadAllSeriesCSV, downloadSeriesCSV } from "@/lib/download";
-import { defaultOpName, operate, type OpType } from "@/lib/operations";
+import { defaultOpName, operate, portfolioReturns, type OpType } from "@/lib/operations";
 
 function monthEndISO(y: number, m: number): string | null {
   if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12 || y < 1900 || y > 2100) {
@@ -237,7 +237,7 @@ export default function UniverseBuilder({
   const [overId, setOverId] = useState<string | null>(null);
   const [librarySearch, setLibrarySearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
-  const [tab, setTab] = useState<"french" | "ms" | "paste" | "op">("french");
+  const [tab, setTab] = useState<"french" | "ms" | "paste" | "op" | "port">("french");
   const [pasteName, setPasteName] = useState("SPY");
   // operation builder state
   const [opType, setOpType] = useState<OpType>("diff");
@@ -435,6 +435,12 @@ export default function UniverseBuilder({
           onClick={() => setTab("op")}
         >
           Operar
+        </button>
+        <button
+          className={`px-3 py-1.5 ${tab === "port" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
+          onClick={() => setTab("port")}
+        >
+          Cartera
         </button>
       </div>
 
@@ -719,6 +725,14 @@ export default function UniverseBuilder({
             onAdd([s]);
             setOpName("");
           }}
+          onError={setError}
+        />
+      )}
+
+      {tab === "port" && (
+        <PortfolioBuilder
+          allSeries={series}
+          onCreate={(s) => onAdd([s])}
           onError={setError}
         />
       )}
@@ -1165,6 +1179,183 @@ function OperationBuilder({
         Las operaciones se aplican mes por mes sobre el período en común. La serie nueva
         se guarda como cualquier otra y se sincroniza al server compartido.
       </p>
+    </div>
+  );
+}
+
+function PortfolioBuilder({
+  allSeries,
+  onCreate,
+  onError,
+}: {
+  allSeries: SeriesData[];
+  onCreate: (s: SeriesData) => void;
+  onError: (msg: string | null) => void;
+}) {
+  // peso en % por id; estar en el objeto = ser miembro de la cartera.
+  const [weights, setWeights] = useState<Record<string, number>>({});
+  const [name, setName] = useState("");
+  const [search, setSearch] = useState("");
+
+  const members = useMemo(
+    () =>
+      allSeries
+        .filter((s) => s.id in weights)
+        .map((s) => ({ series: s, weight: weights[s.id] || 0 })),
+    [allSeries, weights],
+  );
+  const totalW = members.reduce((a, m) => a + m.weight, 0);
+
+  const preview = useMemo(() => portfolioReturns(members), [members]);
+
+  const filtered = useMemo(
+    () =>
+      search.trim()
+        ? allSeries.filter((s) => s.name.toLowerCase().includes(search.trim().toLowerCase()))
+        : allSeries,
+    [allSeries, search],
+  );
+
+  function toggle(id: string) {
+    setWeights((prev) => {
+      const next = { ...prev };
+      if (id in next) {
+        delete next[id];
+      } else {
+        const n = Object.keys(next).length + 1;
+        next[id] = Math.round((100 / n) * 100) / 100;
+      }
+      return next;
+    });
+  }
+
+  function setWeight(id: string, val: number) {
+    setWeights((prev) => ({ ...prev, [id]: val }));
+  }
+
+  function equalize() {
+    setWeights((prev) => {
+      const ids = Object.keys(prev);
+      if (ids.length === 0) return prev;
+      const w = Math.round((100 / ids.length) * 100) / 100;
+      return Object.fromEntries(ids.map((id) => [id, w]));
+    });
+  }
+
+  const autoName = `Cartera (${members.length} activo${members.length === 1 ? "" : "s"})`;
+
+  return (
+    <div className="space-y-3 text-sm">
+      <p className="text-[11px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded p-2 leading-relaxed">
+        Combiná varios activos con pesos fijos en una cartera rebalanceada cada mes
+        (<span className="font-mono">r = Σ wᵢ·rᵢ</span>). Los pesos se normalizan a 100%
+        automáticamente y el cálculo usa los meses en común a todos los miembros.
+      </p>
+
+      {allSeries.length === 0 ? (
+        <p className="text-xs text-zinc-500">Agregá series al universo primero.</p>
+      ) : (
+        <>
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="🔍 Filtrar activos…"
+            className="w-full border border-zinc-300 rounded px-2 py-1 text-xs bg-white"
+          />
+
+          <div className="border border-zinc-300 rounded bg-white max-h-56 overflow-y-auto divide-y divide-zinc-100">
+            {filtered.map((s) => {
+              const isMember = s.id in weights;
+              const norm = isMember && totalW > 0 ? (weights[s.id] / totalW) * 100 : 0;
+              return (
+                <div key={s.id} className="flex items-center gap-2 px-2 py-1">
+                  <input
+                    type="checkbox"
+                    checked={isMember}
+                    onChange={() => toggle(s.id)}
+                  />
+                  <span className="flex-1 text-xs break-words leading-tight">{s.name}</span>
+                  {isMember && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <input
+                        type="number"
+                        step={1}
+                        value={weights[s.id]}
+                        onChange={(e) => setWeight(s.id, Number(e.target.value))}
+                        className="w-16 border border-zinc-300 rounded px-1.5 py-0.5 bg-white text-right tabular-nums text-xs"
+                      />
+                      <span className="text-[10px] text-zinc-400 w-9 text-right tabular-nums">
+                        {norm.toFixed(0)}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] text-zinc-600">
+            <span>
+              {members.length} activo{members.length === 1 ? "" : "s"} · suma pesos{" "}
+              <b className="tabular-nums">{totalW.toFixed(0)}</b> (se normaliza a 100%)
+            </span>
+            <button onClick={equalize} className="underline hover:text-zinc-900">
+              Pesos iguales
+            </button>
+          </div>
+
+          {preview.length > 0 ? (
+            <p className="text-[11px] text-zinc-500">
+              Backtest: <b>{preview.length}</b> meses · {preview[0].date} →{" "}
+              {preview[preview.length - 1].date}.
+            </p>
+          ) : members.length >= 2 ? (
+            <p className="text-[11px] text-amber-700">
+              Sin meses en común entre los activos elegidos.
+            </p>
+          ) : null}
+
+          <div>
+            <label className="block text-xs text-zinc-600 mb-1">Nombre de la cartera</label>
+            <input
+              value={name || autoName}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={autoName}
+              className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
+            />
+          </div>
+
+          <button
+            disabled={members.length < 2 || preview.length === 0}
+            onClick={() => {
+              const returns = portfolioReturns(members);
+              if (returns.length === 0) {
+                onError("Sin meses en común para armar la cartera.");
+                return;
+              }
+              onError(null);
+              const finalName = (name || autoName).trim() || "Cartera";
+              onCreate({
+                id: `port::${finalName}::${Date.now()}`,
+                name: finalName,
+                source: "custom",
+                returns,
+                active: true,
+              });
+              setWeights({});
+              setName("");
+            }}
+            className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded disabled:opacity-40"
+          >
+            Crear cartera
+          </button>
+          <p className="text-[11px] text-zinc-500">
+            Elegí al menos 2 activos. La cartera se guarda como una serie más y la podés usar
+            en correlaciones, ratio, Base 100, etc.
+          </p>
+        </>
+      )}
     </div>
   );
 }

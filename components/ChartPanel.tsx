@@ -14,10 +14,39 @@ import { cumulativeWealth, DEFAULT_RF, summarize } from "@/lib/metrics";
 import { multiRegress, type MultiRegression } from "@/lib/multiregression";
 import type { SeriesData } from "@/lib/types";
 
-type Mode = "rolling" | "matrix" | "regression";
+type Mode = "rolling" | "matrix" | "regression" | "ratio";
 type RollingSub = "one-vs-many" | "pair";
 
 const WINDOWS = [12, 24, 30, 36, 60, 120];
+
+// Medias móviles tipo SMA50/SMA200. La data es mensual, así que traducimos:
+//   200 días de trading ≈ 10 meses · 50 días ≈ 2 meses (convención trend-following / Faber).
+const MA_FAST_MONTHS = 2; // "50d"
+const MA_SLOW_MONTHS = 10; // "200d"
+
+// Paleta fija para que cada serie y sus medias compartan color.
+const PALETTE = [
+  "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+  "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+];
+
+// Media móvil simple (trailing) sobre una serie de valores; null hasta tener `window` puntos.
+function sma(values: (number | null)[], window: number): (number | null)[] {
+  const out: (number | null)[] = [];
+  let sum = 0;
+  const buf: number[] = [];
+  for (const v of values) {
+    if (v == null || !Number.isFinite(v)) {
+      out.push(null);
+      continue;
+    }
+    buf.push(v);
+    sum += v;
+    if (buf.length > window) sum -= buf.shift()!;
+    out.push(buf.length === window ? sum / window : null);
+  }
+  return out;
+}
 
 export default function ChartPanel({ series }: { series: SeriesData[] }) {
   const [mode, setMode] = useState<Mode>("rolling");
@@ -28,6 +57,9 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
   const [pairA, setPairA] = useState<string>("");
   const [pairB, setPairB] = useState<string>("");
   const [matrixLastN, setMatrixLastN] = useState<number | "all">(60);
+  const [showCorrMA, setShowCorrMA] = useState(false);
+  const [ratioNum, setRatioNum] = useState<string>("");
+  const [ratioDen, setRatioDen] = useState<string>("");
 
   const aligned = useMemo(() => alignSeries(series), [series]);
   const seriesById = useMemo(() => new Map(series.map((s) => [s.id, s])), [series]);
@@ -38,6 +70,12 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
     pairB && seriesById.has(pairB) && pairB !== effectivePairA
       ? pairB
       : series.find((s) => s.id !== effectivePairA)?.id ?? "";
+
+  const effRatioNum = ratioNum && seriesById.has(ratioNum) ? ratioNum : series[0]?.id ?? "";
+  const effRatioDen =
+    ratioDen && seriesById.has(ratioDen) && ratioDen !== effRatioNum
+      ? ratioDen
+      : series.find((s) => s.id !== effRatioNum)?.id ?? "";
 
   return (
     <section className="flex-1 p-6 overflow-y-auto h-screen">
@@ -57,6 +95,7 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
             <option value="rolling">Rolling correlation</option>
             <option value="matrix">Matriz</option>
             <option value="regression">Regresión</option>
+            <option value="ratio">Ratio (precios)</option>
           </select>
         </div>
         {mode === "rolling" && (
@@ -84,6 +123,14 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
                 ))}
               </select>
             </div>
+            <label className="flex items-center gap-1 text-[11px] text-zinc-600 cursor-pointer select-none pb-1">
+              <input
+                type="checkbox"
+                checked={showCorrMA}
+                onChange={(e) => setShowCorrMA(e.target.checked)}
+              />
+              Medias 50d/200d
+            </label>
           </>
         )}
         {mode === "matrix" && (
@@ -119,6 +166,7 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
           setBenchmark={setBenchmark}
           excluded={excluded}
           setExcluded={setExcluded}
+          showMA={showCorrMA}
         />
       ) : mode === "rolling" && rollingSub === "pair" ? (
         <PairRolling
@@ -129,9 +177,18 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
           b={effectivePairB}
           setA={setPairA}
           setB={setPairB}
+          showMA={showCorrMA}
         />
       ) : mode === "regression" ? (
         <RegressionMode series={series} aligned={aligned} />
+      ) : mode === "ratio" ? (
+        <RatioView
+          series={series}
+          num={effRatioNum}
+          den={effRatioDen}
+          setNum={setRatioNum}
+          setDen={setRatioDen}
+        />
       ) : (
         <MatrixView series={series} lastN={matrixLastN} />
       )}
@@ -162,24 +219,67 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
 
 function WealthChart({ series }: { series: SeriesData[] }) {
   const [view, setView] = useState<"wealth" | "monthly">("wealth");
+  const [showMA, setShowMA] = useState(false);
   const common = useMemo(() => commonStartDate(series), [series]);
 
-  const wealthTraces = useMemo(
+  // Base 100 por serie (con color fijo), para reusar en la línea y en sus medias.
+  const wealthBySeries = useMemo(
     () =>
-      series.map((s) => {
+      series.map((s, i) => {
         const trimmed = common ? s.returns.filter((r) => r.date >= common) : s.returns;
         const w = cumulativeWealth(trimmed, 100);
         return {
-          type: "scatter" as const,
-          mode: "lines" as const,
           name: s.name,
-          x: w.map((p) => p.date),
-          y: w.map((p) => p.value),
-          hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra>%{fullData.name}</extra>",
+          color: PALETTE[i % PALETTE.length],
+          dates: w.map((p) => p.date),
+          vals: w.map((p) => p.value),
         };
       }),
     [series, common],
   );
+
+  const wealthTraces = useMemo(() => {
+    const out: any[] = [];
+    for (const { name, color, dates, vals } of wealthBySeries) {
+      out.push({
+        type: "scatter" as const,
+        mode: "lines" as const,
+        name,
+        legendgroup: name,
+        x: dates,
+        y: vals,
+        line: { color },
+        hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra>%{fullData.name}</extra>",
+      });
+      if (showMA) {
+        const fast = sma(vals, MA_FAST_MONTHS);
+        const slow = sma(vals, MA_SLOW_MONTHS);
+        out.push({
+          type: "scatter" as const,
+          mode: "lines" as const,
+          name: `${name} · 50d`,
+          legendgroup: name,
+          showlegend: false,
+          x: dates,
+          y: fast,
+          line: { color, width: 1, dash: "dot" },
+          hovertemplate: `%{x|%Y-%m} · 50d %{y:.1f}<extra>${name}</extra>`,
+        });
+        out.push({
+          type: "scatter" as const,
+          mode: "lines" as const,
+          name: `${name} · 200d`,
+          legendgroup: name,
+          showlegend: false,
+          x: dates,
+          y: slow,
+          line: { color, width: 1.6, dash: "dash" },
+          hovertemplate: `%{x|%Y-%m} · 200d %{y:.1f}<extra>${name}</extra>`,
+        });
+      }
+    }
+    return out;
+  }, [wealthBySeries, showMA]);
 
   const monthlyTraces = useMemo(
     () =>
@@ -213,21 +313,39 @@ function WealthChart({ series }: { series: SeriesData[] }) {
               : "Sin series activas."
             : "Retorno de cada mes sin acumular — cada serie en su historia completa."}
         </p>
-        <div className="inline-flex rounded border border-zinc-300 overflow-hidden text-[11px]">
-          <button
-            className={`px-2 py-0.5 ${view === "wealth" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
-            onClick={() => setView("wealth")}
-          >
-            Base 100
-          </button>
-          <button
-            className={`px-2 py-0.5 ${view === "monthly" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
-            onClick={() => setView("monthly")}
-          >
-            Retornos
-          </button>
+        <div className="flex items-center gap-3">
+          {view === "wealth" && (
+            <label className="flex items-center gap-1 text-[11px] text-zinc-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={showMA}
+                onChange={(e) => setShowMA(e.target.checked)}
+              />
+              Medias 50d/200d
+            </label>
+          )}
+          <div className="inline-flex rounded border border-zinc-300 overflow-hidden text-[11px]">
+            <button
+              className={`px-2 py-0.5 ${view === "wealth" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
+              onClick={() => setView("wealth")}
+            >
+              Base 100
+            </button>
+            <button
+              className={`px-2 py-0.5 ${view === "monthly" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
+              onClick={() => setView("monthly")}
+            >
+              Retornos
+            </button>
+          </div>
         </div>
       </div>
+      {view === "wealth" && showMA && (
+        <p className="text-[10px] text-zinc-400 mb-1">
+          Medias móviles sobre el Base 100 · data mensual: <b>50d ≈ 2 meses</b> (punteada) y{" "}
+          <b>200d ≈ 10 meses</b> (rayada). Cada media comparte color con su serie.
+        </p>
+      )}
       {view === "wealth" ? (
         <PlotlyChart
           data={wealthTraces}
@@ -336,6 +454,7 @@ function OneVsMany({
   setBenchmark,
   excluded,
   setExcluded,
+  showMA,
 }: {
   series: SeriesData[];
   window: number;
@@ -344,20 +463,53 @@ function OneVsMany({
   setBenchmark: (v: string) => void;
   excluded: Set<string>;
   setExcluded: (s: Set<string>) => void;
+  showMA: boolean;
 }) {
   const others = series.filter((s) => s.id !== benchmark && !excluded.has(s.id));
   const bArr = aligned.byId[benchmark] ?? [];
-  const traces = others.map((s) => {
+  const traces = others.flatMap((s, i) => {
+    const color = PALETTE[i % PALETTE.length];
     const rc = rollingCorrelation(bArr, aligned.byId[s.id] ?? [], window);
     const trimmed = trimLeadingNulls(aligned.dates, rc);
-    return {
-      type: "scatter" as const,
-      mode: "lines" as const,
-      name: s.name,
-      x: trimmed.x,
-      y: trimmed.y,
-      hovertemplate: "%{x|%Y-%m} · %{y:.3f}<extra>%{fullData.name}</extra>",
-    };
+    const out: any[] = [
+      {
+        type: "scatter" as const,
+        mode: "lines" as const,
+        name: s.name,
+        legendgroup: s.name,
+        x: trimmed.x,
+        y: trimmed.y,
+        line: { color },
+        hovertemplate: "%{x|%Y-%m} · %{y:.3f}<extra>%{fullData.name}</extra>",
+      },
+    ];
+    if (showMA) {
+      out.push(
+        {
+          type: "scatter" as const,
+          mode: "lines" as const,
+          name: `${s.name} · 50d`,
+          legendgroup: s.name,
+          showlegend: false,
+          x: trimmed.x,
+          y: sma(trimmed.y, MA_FAST_MONTHS),
+          line: { color, width: 1, dash: "dot" },
+          hovertemplate: `%{x|%Y-%m} · 50d %{y:.3f}<extra>${s.name}</extra>`,
+        },
+        {
+          type: "scatter" as const,
+          mode: "lines" as const,
+          name: `${s.name} · 200d`,
+          legendgroup: s.name,
+          showlegend: false,
+          x: trimmed.x,
+          y: sma(trimmed.y, MA_SLOW_MONTHS),
+          line: { color, width: 1.6, dash: "dash" },
+          hovertemplate: `%{x|%Y-%m} · 200d %{y:.3f}<extra>${s.name}</extra>`,
+        },
+      );
+    }
+    return out;
   });
 
   const lastTable = others.map((s) => {
@@ -400,6 +552,12 @@ function OneVsMany({
           legend: { orientation: "h", y: -0.2 },
         }}
       />
+      {showMA && (
+        <p className="text-[10px] text-zinc-400 -mt-2">
+          Medias móviles de la correlación · data mensual: <b>50d ≈ 2 meses</b> (punteada) y{" "}
+          <b>200d ≈ 10 meses</b> (rayada). Cada media comparte color con su serie.
+        </p>
+      )}
       <div className="border rounded text-xs">
         <table className="w-full">
           <thead className="bg-zinc-100">
@@ -493,6 +651,7 @@ function PairRolling({
   b,
   setA,
   setB,
+  showMA,
 }: {
   series: SeriesData[];
   window: number;
@@ -501,6 +660,7 @@ function PairRolling({
   b: string;
   setA: (v: string) => void;
   setB: (v: string) => void;
+  showMA: boolean;
 }) {
   const arrA = aligned.byId[a] ?? [];
   const arrB = aligned.byId[b] ?? [];
@@ -517,6 +677,7 @@ function PairRolling({
         window={window}
         nameA={nameA}
         nameB={nameB}
+        showMA={showMA}
       />
     </div>
   );
@@ -801,6 +962,7 @@ function PearsonRolling({
   window,
   nameA,
   nameB,
+  showMA,
 }: {
   dates: string[];
   arrA: (number | null)[];
@@ -808,6 +970,7 @@ function PearsonRolling({
   window: number;
   nameA: string;
   nameB: string;
+  showMA: boolean;
 }) {
   const rc = rollingCorrelation(arrA, arrB, window);
   const trimmed = trimLeadingNulls(dates, rc);
@@ -818,26 +981,59 @@ function PearsonRolling({
   const max = validRc.length ? Math.max(...validRc) : null;
   const full = correlation(arrA, arrB);
 
+  const corrColor = PALETTE[0];
+  const data: any[] = [
+    {
+      type: "scatter",
+      mode: "lines",
+      name: `${nameA} vs ${nameB}`,
+      x: trimmed.x,
+      y: trimmed.y,
+      line: { color: corrColor },
+      hovertemplate: "%{x|%Y-%m} · %{y:.3f}<extra></extra>",
+    },
+  ];
+  if (showMA) {
+    data.push(
+      {
+        type: "scatter",
+        mode: "lines",
+        name: "50d",
+        x: trimmed.x,
+        y: sma(trimmed.y, MA_FAST_MONTHS),
+        line: { color: corrColor, width: 1, dash: "dot" },
+        hovertemplate: "%{x|%Y-%m} · 50d %{y:.3f}<extra></extra>",
+      },
+      {
+        type: "scatter",
+        mode: "lines",
+        name: "200d",
+        x: trimmed.x,
+        y: sma(trimmed.y, MA_SLOW_MONTHS),
+        line: { color: "#d62728", width: 1.6, dash: "dash" },
+        hovertemplate: "%{x|%Y-%m} · 200d %{y:.3f}<extra></extra>",
+      },
+    );
+  }
+
   return (
     <>
       <PlotlyChart
-        data={[
-          {
-            type: "scatter",
-            mode: "lines",
-            name: `${nameA} vs ${nameB}`,
-            x: trimmed.x,
-            y: trimmed.y,
-            hovertemplate: "%{x|%Y-%m} · %{y:.3f}<extra></extra>",
-          },
-        ]}
+        data={data}
         layout={{
           title: `Rolling correlation ${window}m (Pearson)`,
           yaxis: { range: [-1, 1], title: "ρ" },
           xaxis: { title: "Fecha" },
+          legend: showMA ? { orientation: "h", y: -0.2 } : undefined,
         }}
         height={500}
       />
+      {showMA && (
+        <p className="text-[10px] text-zinc-400 -mt-2">
+          Medias móviles de la correlación · data mensual: <b>50d ≈ 2 meses</b> (punteada) y{" "}
+          <b>200d ≈ 10 meses</b> (rayada, rojo).
+        </p>
+      )}
       <div className="grid grid-cols-5 gap-3 text-sm">
         <Metric label="ρ histórico (todo)" value={full} />
         <Metric label="ρ última" value={last} />
@@ -878,6 +1074,124 @@ function Metric({
     <div className="border rounded p-3 bg-zinc-50">
       <div className="text-xs text-zinc-500">{label}</div>
       <div className="text-xl font-semibold tabular-nums">{body}</div>
+    </div>
+  );
+}
+
+function RatioView({
+  series,
+  num,
+  den,
+  setNum,
+  setDen,
+}: {
+  series: SeriesData[];
+  num: string;
+  den: string;
+  setNum: (v: string) => void;
+  setDen: (v: string) => void;
+}) {
+  const a = series.find((s) => s.id === num);
+  const b = series.find((s) => s.id === den);
+
+  const ratio = useMemo(() => {
+    if (!a || !b) return { x: [] as string[], y: [] as number[], start: null as string | null };
+    // Inicio común y Base 100 de cada serie sobre ese tramo → el ratio arranca en 1.0.
+    const common = commonStartDate([a, b]);
+    const keep = (r: { date: string; value: number }) =>
+      Number.isFinite(r.value) && (!common || r.date >= common);
+    const wa = cumulativeWealth(a.returns.filter(keep), 100);
+    const mapB = new Map(cumulativeWealth(b.returns.filter(keep), 100).map((p) => [p.date, p.value]));
+    const x: string[] = [];
+    const y: number[] = [];
+    for (const p of wa) {
+      const vb = mapB.get(p.date);
+      if (vb == null || vb === 0) continue;
+      x.push(p.date);
+      y.push(p.value / vb);
+    }
+    return { x, y, start: common };
+  }, [a, b]);
+
+  const last = ratio.y.at(-1) ?? null;
+  const min = ratio.y.length ? Math.min(...ratio.y) : null;
+  const max = ratio.y.length ? Math.max(...ratio.y) : null;
+  const nameA = a?.name ?? "A";
+  const nameB = b?.name ?? "B";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-3 text-sm items-end">
+        <div>
+          <label className="block text-xs text-zinc-600 mb-1">Numerador (A)</label>
+          <select
+            value={num}
+            onChange={(e) => setNum(e.target.value)}
+            className="border border-zinc-300 rounded px-2 py-1 bg-white min-w-[260px]"
+          >
+            {series.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="text-zinc-400 pb-1 text-lg">/</div>
+        <div>
+          <label className="block text-xs text-zinc-600 mb-1">Denominador (B)</label>
+          <select
+            value={den}
+            onChange={(e) => setDen(e.target.value)}
+            className="border border-zinc-300 rounded px-2 py-1 bg-white min-w-[260px]"
+          >
+            {series
+              .filter((s) => s.id !== num)
+              .map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+          </select>
+        </div>
+      </div>
+
+      <PlotlyChart
+        data={[
+          {
+            type: "scatter",
+            mode: "lines",
+            name: `${nameA} / ${nameB}`,
+            x: ratio.x,
+            y: ratio.y,
+            line: { color: PALETTE[0] },
+            hovertemplate: "%{x|%Y-%m} · %{y:.3f}<extra></extra>",
+          },
+        ]}
+        layout={{
+          title: `Ratio de precios: ${nameA} / ${nameB}`,
+          yaxis: { title: "Ratio (rebase 1.0)" },
+          xaxis: { title: "Fecha" },
+          shapes: [
+            {
+              type: "line",
+              xref: "paper",
+              x0: 0,
+              x1: 1,
+              y0: 1,
+              y1: 1,
+              line: { color: "#9ca3af", width: 1, dash: "dot" },
+            },
+          ],
+        }}
+        height={500}
+      />
+      <p className="text-[11px] text-zinc-500">
+        División de los Base 100 de ambas series desde el inicio común
+        {ratio.start ? ` (${ratio.start})` : ""}. Arranca en <b>1.0</b>: si sube, <b>{nameA}</b>{" "}
+        rinde más que <b>{nameB}</b>; si baja, al revés.
+      </p>
+      <div className="grid grid-cols-4 gap-3 text-sm">
+        <Metric label="Ratio actual" value={last} />
+        <Metric label="A vs B desde inicio" value={last == null ? null : last - 1} asPct />
+        <Metric label="Mínimo" value={min} />
+        <Metric label="Máximo" value={max} />
+      </div>
     </div>
   );
 }
