@@ -73,7 +73,7 @@ function sourceBadge(s: SeriesData): { label: string; cls: string } {
   if (s.id.startsWith("ms::")) return { label: "MS", cls: "bg-emerald-100 text-emerald-800" };
   if (s.id.startsWith("op::")) return { label: "Op", cls: "bg-orange-100 text-orange-800" };
   if (s.id.startsWith("paste::")) return { label: "Excel", cls: "bg-purple-100 text-purple-800" };
-  return { label: "—", cls: "bg-zinc-100 text-zinc-600" };
+  return { label: "—", cls: "bg-brand-50 text-zinc-600" };
 }
 
 // Convert cryptic Ken French column names into a human-readable position.
@@ -386,9 +386,9 @@ export default function UniverseBuilder({
   }
 
   return (
-    <aside className="w-96 shrink-0 border-r border-zinc-200 bg-zinc-50 p-4 h-screen sticky top-0 flex flex-col">
+    <aside className="w-96 shrink-0 border-r border-zinc-200 bg-surface p-4 h-screen sticky top-0 flex flex-col overflow-y-auto">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold">Universo</h2>
+        <h2 className="text-base font-semibold tracking-tight text-brand-800">Universo</h2>
         {storageBadge && (
           <span
             className={`text-[10px] px-2 py-0.5 rounded ${
@@ -396,7 +396,7 @@ export default function UniverseBuilder({
                 ? "bg-emerald-100 text-emerald-800"
                 : storageBadge === "solo local"
                 ? "bg-amber-100 text-amber-800"
-                : "bg-zinc-100 text-zinc-500"
+                : "bg-brand-50 text-zinc-500"
             }`}
             title={
               storageBadge === "compartido"
@@ -411,33 +411,35 @@ export default function UniverseBuilder({
         )}
       </div>
 
+      <div className="order-2 mt-5 pt-4 border-t border-zinc-200">
+      <h3 className="text-sm font-semibold mb-3">Agregar activos</h3>
       <div className="flex border-b border-zinc-200 mb-3 text-sm">
         <button
-          className={`px-3 py-1.5 ${tab === "french" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
+          className={`px-3 py-1.5 ${tab === "french" ? "border-b-2 border-brand-700 font-semibold" : "text-zinc-500"}`}
           onClick={() => setTab("french")}
         >
           Fama French
         </button>
         <button
-          className={`px-3 py-1.5 ${tab === "ms" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
+          className={`px-3 py-1.5 ${tab === "ms" ? "border-b-2 border-brand-700 font-semibold" : "text-zinc-500"}`}
           onClick={() => setTab("ms")}
         >
           Morningstar
         </button>
         <button
-          className={`px-3 py-1.5 ${tab === "paste" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
+          className={`px-3 py-1.5 ${tab === "paste" ? "border-b-2 border-brand-700 font-semibold" : "text-zinc-500"}`}
           onClick={() => setTab("paste")}
         >
           Excel
         </button>
         <button
-          className={`px-3 py-1.5 ${tab === "op" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
+          className={`px-3 py-1.5 ${tab === "op" ? "border-b-2 border-brand-700 font-semibold" : "text-zinc-500"}`}
           onClick={() => setTab("op")}
         >
           Operar
         </button>
         <button
-          className={`px-3 py-1.5 ${tab === "port" ? "border-b-2 border-zinc-900 font-semibold" : "text-zinc-500"}`}
+          className={`px-3 py-1.5 ${tab === "port" ? "border-b-2 border-brand-700 font-semibold" : "text-zinc-500"}`}
           onClick={() => setTab("port")}
         >
           Cartera
@@ -505,7 +507,7 @@ export default function UniverseBuilder({
           <button
             disabled={busy || !datasetId || selectedCols.length === 0}
             onClick={addFrench}
-            className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded disabled:opacity-40"
+            className="w-full bg-brand-700 text-white text-sm py-1.5 rounded disabled:opacity-40"
           >
             {busy ? "Agregando…" : "Agregar al universo"}
           </button>
@@ -549,11 +551,11 @@ export default function UniverseBuilder({
           <button
             disabled={busy || !msIdValue.trim()}
             onClick={addMorningstar}
-            className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded disabled:opacity-40"
+            className="w-full bg-brand-700 text-white text-sm py-1.5 rounded disabled:opacity-40"
           >
             {busy ? "Bajando…" : "Bajar de Morningstar"}
           </button>
-          <div className="text-[11px] text-zinc-600 bg-zinc-100 border border-zinc-200 rounded p-2 space-y-1">
+          <div className="text-[11px] text-zinc-600 bg-brand-50 border border-zinc-200 rounded p-2 space-y-1">
             <p>
               <b>Lo que se baja:</b> retornos mensuales <b>total return</b> (HP010, NAV-based,
               dividendos reinvertidos), máxima historia disponible para ese security.
@@ -697,7 +699,7 @@ export default function UniverseBuilder({
               ]);
               setPasteText("");
             }}
-            className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded"
+            className="w-full bg-brand-700 text-white text-sm py-1.5 rounded"
           >
             Agregar serie
           </button>
@@ -740,8 +742,9 @@ export default function UniverseBuilder({
       {error && (
         <p className="mt-3 text-xs text-red-600 break-words">{error}</p>
       )}
+      </div>
 
-      <div className="mt-5 pt-4 border-t border-zinc-200 flex-1 min-h-0 flex flex-col">
+      <div className="order-1 flex flex-col">
         {(() => {
           const activeCount = series.filter((s) => s.active !== false).length;
           // tally by source for the subline
@@ -775,7 +778,7 @@ export default function UniverseBuilder({
           );
         })()}
         {series.length === 0 ? (
-          <p className="text-xs text-zinc-500">Vacío — agregá series arriba.</p>
+          <p className="text-xs text-zinc-500">Vacío — agregá series abajo.</p>
         ) : (
           <>
             <input
@@ -839,7 +842,7 @@ export default function UniverseBuilder({
                     className={`flex items-start gap-1.5 text-xs px-1 py-0.5 rounded transition-colors ${
                       isHl ? "bg-amber-50 border-l-2 border-amber-400 pl-1.5" : ""
                     } ${dragId === s.id ? "opacity-40" : ""} ${
-                      isDragOver ? "border-t-2 border-zinc-900" : ""
+                      isDragOver ? "border-t-2 border-brand-700" : ""
                     }`}
                   >
                     <span
@@ -919,7 +922,7 @@ export default function UniverseBuilder({
               const inactiveRows = filtered.filter((s) => s.active === false);
 
               return (
-                <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+                <div className="max-h-[50vh] overflow-y-auto pr-1">
                   <div className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded px-1.5 py-1 mb-1 mt-1 sticky top-0 z-10 border border-emerald-200">
                     ✓ En análisis ({activeRows.length})
                   </div>
@@ -932,7 +935,7 @@ export default function UniverseBuilder({
                   )}
 
                   <div
-                    className="text-[11px] font-semibold text-zinc-600 bg-zinc-100 rounded px-1.5 py-1 mb-1 flex items-center justify-between cursor-pointer hover:bg-zinc-200 sticky top-0 z-10 border border-zinc-200"
+                    className="text-[11px] font-semibold text-zinc-600 bg-brand-50 rounded px-1.5 py-1 mb-1 flex items-center justify-between cursor-pointer hover:bg-zinc-200 sticky top-0 z-10 border border-zinc-200"
                     onClick={() => setShowInactive(!showInactive)}
                   >
                     <span>○ Disponibles ({inactiveRows.length})</span>
@@ -952,7 +955,7 @@ export default function UniverseBuilder({
             <button
               onClick={() => downloadAllSeriesCSV(series.filter((s) => s.active !== false))}
               disabled={series.filter((s) => s.active !== false).length === 0}
-              className="mt-3 w-full bg-zinc-100 hover:bg-zinc-200 text-zinc-900 text-xs py-1.5 rounded border border-zinc-300 disabled:opacity-40"
+              className="mt-3 w-full bg-brand-50 hover:bg-zinc-200 text-zinc-900 text-xs py-1.5 rounded border border-zinc-300 disabled:opacity-40"
             >
               ⬇ Descargar activas combinadas (Excel)
             </button>
@@ -1170,7 +1173,7 @@ function OperationBuilder({
             active: true,
           });
         }}
-        className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded disabled:opacity-40"
+        className="w-full bg-brand-700 text-white text-sm py-1.5 rounded disabled:opacity-40"
       >
         Crear serie derivada
       </button>
@@ -1346,7 +1349,7 @@ function PortfolioBuilder({
               setWeights({});
               setName("");
             }}
-            className="w-full bg-zinc-900 text-white text-sm py-1.5 rounded disabled:opacity-40"
+            className="w-full bg-brand-700 text-white text-sm py-1.5 rounded disabled:opacity-40"
           >
             Crear cartera
           </button>

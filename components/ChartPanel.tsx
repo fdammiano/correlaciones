@@ -78,11 +78,16 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
       : series.find((s) => s.id !== effRatioNum)?.id ?? "";
 
   return (
-    <section className="flex-1 p-6 overflow-y-auto h-screen">
-      <h1 className="text-xl font-semibold mb-1">Rolling Correlations</h1>
-      <p className="text-xs text-zinc-500 mb-4">
-        Fama French portfolios · retornos mensuales
-      </p>
+    <section className="flex-1 p-6 overflow-y-auto h-screen bg-white">
+      <div className="mb-5 border-b border-zinc-200 pb-4">
+        <h1 className="text-2xl font-semibold tracking-tight text-brand-800">
+          Rolling Correlations
+        </h1>
+        <div className="mt-1.5 h-0.5 w-10 rounded-full bg-gold-500" />
+        <p className="text-xs text-zinc-500 mt-2">
+          Fama French portfolios · retornos mensuales
+        </p>
+      </div>
 
       <div className="flex flex-wrap gap-3 items-end mb-5 text-sm">
         <div>
@@ -326,13 +331,13 @@ function WealthChart({ series }: { series: SeriesData[] }) {
           )}
           <div className="inline-flex rounded border border-zinc-300 overflow-hidden text-[11px]">
             <button
-              className={`px-2 py-0.5 ${view === "wealth" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
+              className={`px-2 py-0.5 ${view === "wealth" ? "bg-brand-700 text-white" : "bg-white text-zinc-700"}`}
               onClick={() => setView("wealth")}
             >
               Base 100
             </button>
             <button
-              className={`px-2 py-0.5 ${view === "monthly" ? "bg-zinc-900 text-white" : "bg-white text-zinc-700"}`}
+              className={`px-2 py-0.5 ${view === "monthly" ? "bg-brand-700 text-white" : "bg-white text-zinc-700"}`}
               onClick={() => setView("monthly")}
             >
               Retornos
@@ -404,7 +409,7 @@ function MetricsTable({ series }: { series: SeriesData[] }) {
       </div>
       <div className="overflow-x-auto border rounded">
         <table className="w-full text-xs tabular-nums">
-          <thead className="bg-zinc-100">
+          <thead className="bg-brand-50">
             <tr>
               <th className="px-3 py-1.5 text-left">Serie</th>
               <th className="px-2 py-1.5 text-right">Inicio</th>
@@ -560,7 +565,7 @@ function OneVsMany({
       )}
       <div className="border rounded text-xs">
         <table className="w-full">
-          <thead className="bg-zinc-100">
+          <thead className="bg-brand-50">
             <tr>
               <th className="text-left px-3 py-1.5">Serie</th>
               <th className="text-right px-3 py-1.5">ρ histórico (todo)</th>
@@ -809,7 +814,7 @@ function RegressionResults({
       ? { label: "**", cls: "bg-emerald-100 text-emerald-800" }
       : p < 0.05
       ? { label: "*", cls: "bg-emerald-100 text-emerald-800" }
-      : { label: "n.s.", cls: "bg-zinc-100 text-zinc-600" };
+      : { label: "n.s.", cls: "bg-brand-50 text-zinc-600" };
 
   const isInterceptLike = (i: number) => i === 0;
 
@@ -895,7 +900,7 @@ function RegressionResults({
 
       <div className="overflow-x-auto border rounded">
         <table className="w-full text-xs tabular-nums">
-          <thead className="bg-zinc-100">
+          <thead className="bg-brand-50">
             <tr>
               <th className="px-3 py-1.5 text-left">Coeficiente</th>
               <th className="px-2 py-1.5 text-right">Valor</th>
@@ -1253,11 +1258,11 @@ function ReturnsTable({
       </div>
       <div className="overflow-auto max-h-[60vh]">
         <table className="text-[11px] tabular-nums w-full">
-          <thead className="bg-zinc-100 sticky top-0 shadow-[inset_0_-1px_0_rgba(0,0,0,0.05)]">
+          <thead className="bg-brand-50 sticky top-0 shadow-[inset_0_-1px_0_rgba(0,0,0,0.05)]">
             <tr>
-              <th className="px-2 py-1 text-left bg-zinc-100">Fecha</th>
+              <th className="px-2 py-1 text-left bg-brand-50">Fecha</th>
               {series.map((s) => (
-                <th key={s.id} className="px-2 py-1 text-right whitespace-nowrap bg-zinc-100">
+                <th key={s.id} className="px-2 py-1 text-right whitespace-nowrap bg-brand-50">
                   {s.name}
                 </th>
               ))}
