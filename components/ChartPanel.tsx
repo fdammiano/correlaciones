@@ -77,6 +77,13 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
       ? ratioDen
       : series.find((s) => s.id !== effRatioNum)?.id ?? "";
 
+  // Abre el modo Ratio con un par puntual (numerador, denominador).
+  function showRatioFor(numId: string, denId: string) {
+    setRatioNum(numId);
+    setRatioDen(denId);
+    setMode("ratio");
+  }
+
   return (
     <section className="flex-1 p-6 overflow-y-auto h-screen bg-white">
       <div className="mb-5 border-b border-zinc-200 pb-4">
@@ -183,6 +190,7 @@ export default function ChartPanel({ series }: { series: SeriesData[] }) {
           setA={setPairA}
           setB={setPairB}
           showMA={showCorrMA}
+          onShowRatio={showRatioFor}
         />
       ) : mode === "regression" ? (
         <RegressionMode series={series} aligned={aligned} />
@@ -657,6 +665,7 @@ function PairRolling({
   setA,
   setB,
   showMA,
+  onShowRatio,
 }: {
   series: SeriesData[];
   window: number;
@@ -666,6 +675,7 @@ function PairRolling({
   setA: (v: string) => void;
   setB: (v: string) => void;
   showMA: boolean;
+  onShowRatio: (numId: string, denId: string) => void;
 }) {
   const arrA = aligned.byId[a] ?? [];
   const arrB = aligned.byId[b] ?? [];
@@ -675,6 +685,13 @@ function PairRolling({
   return (
     <div className="space-y-4">
       <PairAB series={series} a={a} b={b} setA={setA} setB={setB} />
+      <button
+        onClick={() => onShowRatio(a, b)}
+        title={`Numerador: ${nameA} · Denominador: ${nameB}`}
+        className="inline-flex items-center gap-1.5 rounded border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-medium text-brand-800 hover:bg-brand-100"
+      >
+        Ver ratio de precios:&nbsp;<b>{nameA}</b>&nbsp;÷&nbsp;<b>{nameB}</b>&nbsp;→
+      </button>
       <PearsonRolling
         dates={aligned.dates}
         arrA={arrA}
@@ -1139,7 +1156,7 @@ function RatioView({
             ))}
           </select>
         </div>
-        <div className="text-zinc-400 pb-1 text-lg">/</div>
+        <div className="text-zinc-400 pb-1 text-lg">÷</div>
         <div>
           <label className="block text-xs text-zinc-600 mb-1">Denominador (B)</label>
           <select
@@ -1154,7 +1171,21 @@ function RatioView({
               ))}
           </select>
         </div>
+        <button
+          onClick={() => {
+            const prevNum = num;
+            setNum(den);
+            setDen(prevNum);
+          }}
+          title="Invertir numerador y denominador"
+          className="rounded border border-zinc-300 bg-white px-3 py-1 text-xs text-zinc-700 hover:bg-zinc-50"
+        >
+          ⇄ Invertir
+        </button>
       </div>
+      <p className="text-xs text-zinc-600">
+        Numerador: <b>{nameA}</b> · Denominador: <b>{nameB}</b>
+      </p>
 
       <PlotlyChart
         data={[
