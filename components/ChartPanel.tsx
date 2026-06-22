@@ -455,7 +455,14 @@ function MetricsTable({ series }: { series: SeriesData[] }) {
                 <td className="px-2 py-1 text-right">{fmtPct(m.annualReturn)}</td>
                 <td className="px-2 py-1 text-right">{fmtPct(m.annualVol)}</td>
                 <td className="px-2 py-1 text-right">{fmtNum(m.sharpe)}</td>
-                <td className="px-2 py-1 text-right text-red-700">{fmtPct(m.maxDrawdown)}</td>
+                <td className="px-2 py-1 text-right text-red-700">
+                  {fmtPct(m.maxDrawdown)}
+                  {m.maxDrawdownDate && (
+                    <div className="text-[9px] font-normal text-zinc-400">
+                      {m.maxDrawdownDate.slice(0, 7)}
+                    </div>
+                  )}
+                </td>
                 <td className="px-2 py-1 text-right">{fmtPct(m.positivePct, 1)}</td>
                 <td className="px-2 py-1 text-right text-red-700">{fmtPct(m.minMonthly)}</td>
                 <td className="px-2 py-1 text-right text-emerald-700">{fmtPct(m.maxMonthly)}</td>

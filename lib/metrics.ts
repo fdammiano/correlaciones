@@ -8,6 +8,7 @@ export type SeriesMetrics = {
   annualVol: number | null;
   sharpe: number | null;
   maxDrawdown: number | null;
+  maxDrawdownDate: string | null;
   positivePct: number | null;
   minMonthly: number | null;
   maxMonthly: number | null;
@@ -33,6 +34,7 @@ export function summarize(returns: ReturnPoint[], rf: number = DEFAULT_RF): Seri
       annualVol: null,
       sharpe: null,
       maxDrawdown: null,
+      maxDrawdownDate: null,
       positivePct: null,
       minMonthly: null,
       maxMonthly: null,
@@ -54,11 +56,15 @@ export function summarize(returns: ReturnPoint[], rf: number = DEFAULT_RF): Seri
   let wealth = 1;
   let peak = 1;
   let maxDD = 0;
-  for (const v of vals) {
-    wealth *= 1 + v;
+  let maxDrawdownDate: string | null = null;
+  for (let i = 0; i < vals.length; i++) {
+    wealth *= 1 + vals[i];
     if (wealth > peak) peak = wealth;
     const dd = wealth / peak - 1;
-    if (dd < maxDD) maxDD = dd;
+    if (dd < maxDD) {
+      maxDD = dd;
+      maxDrawdownDate = sorted[i].date;
+    }
   }
 
   const positivePct = vals.filter((v) => v > 0).length / n;
@@ -73,6 +79,7 @@ export function summarize(returns: ReturnPoint[], rf: number = DEFAULT_RF): Seri
     annualVol,
     sharpe,
     maxDrawdown: maxDD,
+    maxDrawdownDate,
     positivePct,
     minMonthly,
     maxMonthly,
