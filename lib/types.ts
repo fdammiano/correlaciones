@@ -1,5 +1,13 @@
 export type ReturnPoint = { date: string; value: number };
 
+export type RebalanceFreq = "monthly" | "quarterly" | "annual" | "hold";
+
+// Receta de una cartera derivada, para poder re-editarla sin recrearla.
+export type PortfolioRecipe = {
+  members: { id: string; weight: number }[];
+  rebalance: RebalanceFreq;
+};
+
 export type SeriesData = {
   id: string;
   name: string;
@@ -7,6 +15,8 @@ export type SeriesData = {
   returns: ReturnPoint[];
   active?: boolean;
   highlighted?: boolean;
+  /** presente solo en series tipo cartera creadas con el armador */
+  portfolio?: PortfolioRecipe;
 };
 
 export type FrenchDatasetMeta = {

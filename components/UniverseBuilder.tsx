@@ -3,7 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FrenchDatasetMeta, SeriesData, Region, Family, ReturnPoint } from "@/lib/types";
 import { downloadAllSeriesCSV, downloadSeriesCSV } from "@/lib/download";
-import { defaultOpName, operate, portfolioReturns, type OpType } from "@/lib/operations";
+import {
+  defaultOpName,
+  operate,
+  portfolioReturns,
+  REBALANCE_LABEL,
+  type OpType,
+  type RebalanceFreq,
+} from "@/lib/operations";
 
 function monthEndISO(y: number, m: number): string | null {
   if (!Number.isFinite(y) || !Number.isFinite(m) || m < 1 || m > 12 || y < 1900 || y > 2100) {
@@ -210,34 +217,65 @@ const FAMILIES: Family[] = [
   "Industry / Sector",
 ];
 
+type TabInfo = { id: string; name: string; count: number };
+
 type Props = {
   series: SeriesData[];
+  tabs: TabInfo[];
+  activeTabId: string;
+  isCollection: boolean;
+  collectionName: string;
+  onSelectTab: (id: string) => void;
+  onNewCollection: () => void;
+  onSaveActiveAsCollection: () => void;
+  onRenameActiveCollection: (name: string) => void;
+  onDeleteActiveCollection: () => void;
   onAdd: (s: SeriesData[]) => void;
   onRemove: (id: string) => void;
   onClear: () => void;
   onToggleActive: (id: string) => void;
   onSetAllActive: (active: boolean) => void;
+  onActivateOnly: (ids: string[]) => void;
+  onInvert: () => void;
   onToggleHighlight: (id: string) => void;
+  onUpdateSeries: (s: SeriesData) => void;
   onReorder: (draggedId: string, targetId: string) => void;
+  refreshing?: boolean;
   storageBadge?: string;
 };
 
 export default function UniverseBuilder({
   series,
+  tabs,
+  activeTabId,
+  isCollection,
+  collectionName,
+  onSelectTab,
+  onNewCollection,
+  onSaveActiveAsCollection,
+  onRenameActiveCollection,
+  onDeleteActiveCollection,
   onAdd,
   onRemove,
   onClear,
   onToggleActive,
   onSetAllActive,
+  onActivateOnly,
+  onInvert,
   onToggleHighlight,
+  onUpdateSeries,
   onReorder,
+  refreshing,
   storageBadge,
 }: Props) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [librarySearch, setLibrarySearch] = useState("");
   const [showInactive, setShowInactive] = useState(false);
-  const [tab, setTab] = useState<"french" | "ms" | "paste" | "op" | "port">("french");
+  const [tab, setTab] = useState<"french" | "yahoo" | "ms" | "paste" | "op" | "port">("french");
+  const [editingPortfolioId, setEditingPortfolioId] = useState<string | null>(null);
+  const [yfTicker, setYfTicker] = useState("");
+  const [yfName, setYfName] = useState("");
   const [pasteName, setPasteName] = useState("SPY");
   // operation builder state
   const [opType, setOpType] = useState<OpType>("diff");
@@ -250,6 +288,17 @@ export default function UniverseBuilder({
   const [msIdType, setMsIdType] = useState<"isin" | "ticker" | "secid">("isin");
   const [msIdValue, setMsIdValue] = useState("");
   const [msName, setMsName] = useState("");
+  // Token de Morningstar (vence cada 24 h; se pega acá y se guarda en KV)
+  const [msTokenStatus, setMsTokenStatus] = useState<{
+    hasToken: boolean;
+    updatedAt: string | null;
+    requiresPassword: boolean;
+    configured: boolean;
+  } | null>(null);
+  const [msTokenInput, setMsTokenInput] = useState("");
+  const [msTokenPassword, setMsTokenPassword] = useState("");
+  const [msTokenBusy, setMsTokenBusy] = useState(false);
+  const [msTokenMsg, setMsTokenMsg] = useState<string | null>(null);
   const [pasteKind, setPasteKind] = useState<"returns_dec" | "returns_pct" | "prices">("prices");
   const [pasteText, setPasteText] = useState("");
   const [pasteFmt, setPasteFmt] = useState<DecimalFormat>("comma");
@@ -270,10 +319,33 @@ export default function UniverseBuilder({
       .catch(() => setError("No pude cargar la lista de Fama French."));
   }, []);
 
+  // Al entrar a una colección, mostrar la lista "Agregar del maestro" desplegada.
+  useEffect(() => {
+    if (isCollection) setShowInactive(true);
+  }, [activeTabId, isCollection]);
+
   const filtered = useMemo(
     () => datasets.filter((d) => d.region === region && d.family === family),
     [datasets, region, family],
   );
+
+  // Solo ofrecer regiones/familias que EXISTEN en la base de Ken French.
+  // Ej: Emerging Markets no tiene Industry/Sector ni single-sorts.
+  const availableRegions = useMemo(
+    () => REGIONS.filter((r) => datasets.some((d) => d.region === r)),
+    [datasets],
+  );
+  const familiesForRegion = useMemo(
+    () => FAMILIES.filter((f) => datasets.some((d) => d.region === region && d.family === f)),
+    [datasets, region],
+  );
+
+  // Si al cambiar de región la familia actual no existe ahí, saltar a la primera válida.
+  useEffect(() => {
+    if (familiesForRegion.length > 0 && !familiesForRegion.includes(family)) {
+      setFamily(familiesForRegion[0]);
+    }
+  }, [familiesForRegion, family]);
 
   const pastePreview = useMemo(() => {
     if (!pasteText.trim()) return null;
@@ -341,6 +413,76 @@ export default function UniverseBuilder({
     }
   }
 
+  async function refreshMsTokenStatus() {
+    try {
+      const res = await fetch("/api/ms-token", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setMsTokenStatus({
+        hasToken: !!data.hasToken,
+        updatedAt: data.updatedAt ?? null,
+        requiresPassword: !!data.requiresPassword,
+        configured: !!data.configured,
+      });
+    } catch {
+      // silencioso
+    }
+  }
+
+  // Cargar el estado del token al entrar a la pestaña Morningstar
+  useEffect(() => {
+    if (tab === "ms") refreshMsTokenStatus();
+  }, [tab]);
+
+  async function saveMsToken() {
+    if (!msTokenInput.trim()) return;
+    setMsTokenBusy(true);
+    setMsTokenMsg(null);
+    try {
+      const res = await fetch("/api/ms-token", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          token: msTokenInput.trim(),
+          password: msTokenPassword || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      setMsTokenInput("");
+      setMsTokenPassword("");
+      setMsTokenMsg("Token guardado ✓");
+      await refreshMsTokenStatus();
+    } catch (e: any) {
+      setMsTokenMsg(e.message ?? "No se pudo guardar el token");
+    } finally {
+      setMsTokenBusy(false);
+    }
+  }
+
+  function msTokenInfo(): { label: string; tone: "ok" | "warn" | "bad" } {
+    const st = msTokenStatus;
+    if (!st) return { label: "cargando…", tone: "warn" };
+    if (!st.configured) return { label: "KV no configurado en Vercel", tone: "bad" };
+    if (!st.hasToken || !st.updatedAt) {
+      return { label: "sin token — pegá uno para habilitar Morningstar", tone: "bad" };
+    }
+    const ageMs = Date.now() - new Date(st.updatedAt).getTime();
+    const hours = ageMs / 3_600_000;
+    const when = new Date(st.updatedAt).toLocaleString("es-UY", {
+      day: "2-digit",
+      month: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    if (hours >= 24) {
+      return { label: `vencido (${when}) — pegá uno nuevo`, tone: "bad" };
+    }
+    const age =
+      hours < 1 ? `${Math.max(1, Math.round(ageMs / 60000))} min` : `${Math.round(hours)} h`;
+    return { label: `activo · hace ${age} (${when})`, tone: "ok" };
+  }
+
   async function addMorningstar() {
     if (!msIdValue.trim()) return;
     setBusy(true);
@@ -379,6 +521,34 @@ export default function UniverseBuilder({
     }
   }
 
+  async function addYahoo() {
+    const ticker = yfTicker.trim();
+    if (!ticker) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/yahoo?ticker=${encodeURIComponent(ticker)}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      const returns = (data.returns ?? []) as ReturnPoint[];
+      if (returns.length === 0) throw new Error("Sin retornos para ese ticker.");
+      onAdd([
+        {
+          id: `yahoo::${ticker.toUpperCase()}`,
+          name: yfName.trim() || ticker.toUpperCase(),
+          source: "yahoo",
+          returns,
+        },
+      ]);
+      setYfTicker("");
+      setYfName("");
+    } catch (e: any) {
+      setError(e.message ?? "Error con Yahoo Finance");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function toggleCol(c: string) {
     setSelectedCols((prev) =>
       prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
@@ -386,9 +556,89 @@ export default function UniverseBuilder({
   }
 
   return (
-    <aside className="w-96 shrink-0 border-r border-zinc-200 bg-surface p-4 h-screen sticky top-0 flex flex-col overflow-y-auto">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold tracking-tight text-brand-800">Universo</h2>
+    <aside className="w-96 shrink-0 border-r border-zinc-200 bg-surface p-3 h-screen sticky top-0 flex flex-col gap-2 overflow-hidden">
+      {/* ── Cómo funciona (2 pasos, compacto) ── */}
+      <div className="shrink-0 rounded-md bg-sky-50 border border-sky-200 px-2.5 py-1 text-[10px] text-zinc-600 leading-tight">
+        <b className="text-brand-800">Cómo funciona:</b> 1) elegí activos abajo · 2) correlaciones a la derecha →
+      </div>
+
+      {/* ── Pestañas de bibliotecas ── */}
+      <div className="shrink-0 bg-zinc-100 border border-zinc-200 rounded-lg p-2">
+        <div className="flex items-center gap-1 flex-wrap">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => onSelectTab(t.id)}
+              className={`px-2.5 py-1 rounded text-xs transition-colors ${
+                activeTabId === t.id
+                  ? "bg-brand-700 text-white font-semibold"
+                  : "text-zinc-600 hover:bg-brand-50"
+              }`}
+              title={
+                t.id === "master"
+                  ? "Catálogo maestro — compartido entre todos"
+                  : "Colección — privada de este navegador"
+              }
+            >
+              {t.id === "master" ? "★ " : ""}
+              {t.name}
+              <span
+                className={`ml-1 text-[10px] ${
+                  activeTabId === t.id ? "text-brand-100" : "text-zinc-400"
+                }`}
+              >
+                {t.count}
+              </span>
+            </button>
+          ))}
+          <button
+            onClick={onNewCollection}
+            title="Nueva colección"
+            className="px-2 py-1 text-sm text-zinc-500 hover:text-brand-700 rounded hover:bg-brand-50"
+          >
+            ＋
+          </button>
+        </div>
+
+        {isCollection ? (
+          <div className="flex items-center gap-2 mt-2">
+            <input
+              value={collectionName}
+              onChange={(e) => onRenameActiveCollection(e.target.value)}
+              className="flex-1 border border-zinc-300 rounded px-2 py-1 text-sm bg-white"
+              placeholder="Nombre de la colección"
+            />
+            <button
+              onClick={onDeleteActiveCollection}
+              title="Borrar esta colección (no afecta el maestro)"
+              className="text-xs text-zinc-500 hover:text-red-600 border border-zinc-300 rounded px-2 py-1"
+            >
+              Borrar
+            </button>
+          </div>
+        ) : (
+          <p className="text-[10px] text-zinc-500 mt-1.5 leading-tight">
+            Maestro (compartido) ·{" "}
+            <button
+              onClick={onSaveActiveAsCollection}
+              className="text-brand-700 underline"
+              disabled={series.filter((s) => s.active !== false).length === 0}
+            >
+              guardar activas como colección
+            </button>
+          </p>
+        )}
+      </div>
+
+      <div className="shrink-0 flex items-center justify-between">
+        <h2 className="text-base font-semibold tracking-tight text-brand-800 flex items-center gap-2">
+          {isCollection ? "Colección" : "Universo"}
+          {refreshing && (
+            <span className="text-[10px] font-normal text-brand-500 animate-pulse">
+              actualizando…
+            </span>
+          )}
+        </h2>
         {storageBadge && (
           <span
             className={`text-[10px] px-2 py-0.5 rounded ${
@@ -411,39 +661,50 @@ export default function UniverseBuilder({
         )}
       </div>
 
-      <div className="order-2 mt-5 pt-4 border-t border-zinc-200">
-      <h3 className="text-sm font-semibold mb-3">Agregar activos</h3>
-      <div className="flex border-b border-zinc-200 mb-3 text-sm">
-        <button
-          className={`px-3 py-1.5 ${tab === "french" ? "border-b-2 border-brand-700 font-semibold" : "text-zinc-500"}`}
-          onClick={() => setTab("french")}
-        >
-          Fama French
-        </button>
-        <button
-          className={`px-3 py-1.5 ${tab === "ms" ? "border-b-2 border-brand-700 font-semibold" : "text-zinc-500"}`}
-          onClick={() => setTab("ms")}
-        >
-          Morningstar
-        </button>
-        <button
-          className={`px-3 py-1.5 ${tab === "paste" ? "border-b-2 border-brand-700 font-semibold" : "text-zinc-500"}`}
-          onClick={() => setTab("paste")}
-        >
-          Excel
-        </button>
-        <button
-          className={`px-3 py-1.5 ${tab === "op" ? "border-b-2 border-brand-700 font-semibold" : "text-zinc-500"}`}
-          onClick={() => setTab("op")}
-        >
-          Operar
-        </button>
-        <button
-          className={`px-3 py-1.5 ${tab === "port" ? "border-b-2 border-brand-700 font-semibold" : "text-zinc-500"}`}
-          onClick={() => setTab("port")}
-        >
-          Cartera
-        </button>
+      <div className="order-2 flex-1 min-h-0 overflow-y-auto bg-blue-100 border border-blue-200 rounded-lg p-3">
+      <h3 className="text-sm font-semibold mb-0.5">Agregar activos</h3>
+      <p className="text-[11px] text-zinc-500 mb-3">Traé datos de una fuente, o combiná los que ya cargaste.</p>
+
+      <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide mb-1">Datos de mercado</p>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {(
+          [
+            ["french", "Fama French"],
+            ["yahoo", "Yahoo"],
+            ["ms", "Morningstar"],
+            ["paste", "Excel"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={`px-3 py-1 rounded-full text-xs transition-colors ${
+              tab === k ? "bg-brand-700 text-white font-semibold" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wide mb-1">Combinar lo que ya tenés</p>
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {(
+          [
+            ["op", "Operar"],
+            ["port", "Cartera"],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={`px-3 py-1 rounded-full text-xs transition-colors ${
+              tab === k ? "bg-brand-700 text-white font-semibold" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       {tab === "french" && (
@@ -455,7 +716,7 @@ export default function UniverseBuilder({
               onChange={(e) => setRegion(e.target.value as Region)}
               className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
             >
-              {REGIONS.map((r) => (
+              {(availableRegions.length ? availableRegions : REGIONS).map((r) => (
                 <option key={r} value={r}>{r}</option>
               ))}
             </select>
@@ -467,10 +728,13 @@ export default function UniverseBuilder({
               onChange={(e) => setFamily(e.target.value as Family)}
               className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
             >
-              {FAMILIES.map((f) => (
+              {(familiesForRegion.length ? familiesForRegion : FAMILIES).map((f) => (
                 <option key={f} value={f}>{f}</option>
               ))}
             </select>
+            <p className="text-[10px] text-zinc-400 mt-1">
+              Solo se listan las familias que existen para <b>{region}</b> en Ken French.
+            </p>
           </div>
           <div>
             <label className="block text-xs text-zinc-600 mb-1">Dataset</label>
@@ -514,8 +778,98 @@ export default function UniverseBuilder({
         </div>
       )}
 
+      {tab === "yahoo" && (
+        <div className="space-y-3 text-sm">
+          <div>
+            <label className="block text-xs text-zinc-600 mb-1">Ticker de Yahoo</label>
+            <input
+              value={yfTicker}
+              onChange={(e) => setYfTicker(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addYahoo();
+              }}
+              placeholder="SPY, AGG, VT, ^GSPC…"
+              className="w-full border border-zinc-300 rounded px-2 py-1 bg-white font-mono text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-600 mb-1">Nombre para mostrar (opcional)</label>
+            <input
+              value={yfName}
+              onChange={(e) => setYfName(e.target.value)}
+              placeholder="S&P 500 TR"
+              className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
+            />
+          </div>
+          <button
+            disabled={busy || !yfTicker.trim()}
+            onClick={addYahoo}
+            className="w-full bg-brand-700 text-white text-sm py-1.5 rounded disabled:opacity-40"
+          >
+            {busy ? "Bajando…" : "Bajar de Yahoo (mensual TR)"}
+          </button>
+          <div className="text-[11px] text-zinc-600 bg-brand-50 border border-zinc-200 rounded p-2 space-y-1">
+            <p>
+              <b>Qué se baja:</b> retornos <b>mensuales total-return</b> (adjusted close =
+              dividendos reinvertidos + splits), con la <b>máxima historia</b> disponible. Se{" "}
+              <b>actualiza sola</b> al abrir la página (incorpora los meses nuevos).
+            </p>
+            <p className="text-zinc-500">
+              Ticker tal cual Yahoo: acciones/ETFs (SPY, AGG, VT), índices con ^ (^GSPC), etc.
+            </p>
+          </div>
+        </div>
+      )}
+
       {tab === "ms" && (
         <div className="space-y-3 text-sm">
+          {(() => {
+            const info = msTokenInfo();
+            const toneClass =
+              info.tone === "ok"
+                ? "text-green-700 bg-green-50 border-green-200"
+                : info.tone === "warn"
+                  ? "text-amber-700 bg-amber-50 border-amber-200"
+                  : "text-red-700 bg-red-50 border-red-200";
+            return (
+              <div className="border border-zinc-200 rounded p-2 space-y-2 bg-zinc-50">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-zinc-700">Token de Morningstar</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${toneClass}`}>
+                    {info.label}
+                  </span>
+                </div>
+                <textarea
+                  value={msTokenInput}
+                  onChange={(e) => setMsTokenInput(e.target.value)}
+                  placeholder="Pegá acá el token fresco de Morningstar Direct…"
+                  rows={3}
+                  className="w-full border border-zinc-300 rounded px-2 py-1 bg-white font-mono text-[10px] leading-tight"
+                />
+                {msTokenStatus?.requiresPassword && (
+                  <input
+                    type="password"
+                    value={msTokenPassword}
+                    onChange={(e) => setMsTokenPassword(e.target.value)}
+                    placeholder="Contraseña"
+                    className="w-full border border-zinc-300 rounded px-2 py-1 bg-white text-xs"
+                  />
+                )}
+                <button
+                  disabled={msTokenBusy || !msTokenInput.trim()}
+                  onClick={saveMsToken}
+                  className="w-full bg-zinc-800 text-white text-xs py-1.5 rounded disabled:opacity-40"
+                >
+                  {msTokenBusy ? "Guardando…" : "Guardar token"}
+                </button>
+                {msTokenMsg && <p className="text-[11px] text-zinc-600">{msTokenMsg}</p>}
+                <p className="text-[10px] text-zinc-500">
+                  El token vence cada 24 h. Sacá uno nuevo de Morningstar Direct y pegalo acá; no
+                  hace falta redeploy.
+                </p>
+              </div>
+            );
+          })()}
           <div className="flex gap-2">
             <div className="w-24">
               <label className="block text-xs text-zinc-600 mb-1">ID type</label>
@@ -734,7 +1088,15 @@ export default function UniverseBuilder({
       {tab === "port" && (
         <PortfolioBuilder
           allSeries={series}
+          editing={
+            editingPortfolioId ? series.find((s) => s.id === editingPortfolioId) ?? null : null
+          }
           onCreate={(s) => onAdd([s])}
+          onUpdate={(s) => {
+            onUpdateSeries(s);
+            setEditingPortfolioId(null);
+          }}
+          onCancelEdit={() => setEditingPortfolioId(null)}
           onError={setError}
         />
       )}
@@ -744,7 +1106,7 @@ export default function UniverseBuilder({
       )}
       </div>
 
-      <div className="order-1 flex flex-col">
+      <div className="order-1 flex-1 min-h-0 overflow-y-auto flex flex-col bg-green-50 border border-green-200 rounded-lg p-3">
         {(() => {
           const activeCount = series.filter((s) => s.active !== false).length;
           // tally by source for the subline
@@ -762,7 +1124,7 @@ export default function UniverseBuilder({
                 <h3 className="text-sm font-semibold">Biblioteca</h3>
                 {series.length > 0 && (
                   <button onClick={onClear} className="text-xs text-zinc-500 hover:text-red-600">
-                    Borrar todo
+                    {isCollection ? "Vaciar colección" : "Borrar todo"}
                   </button>
                 )}
               </div>
@@ -788,20 +1150,42 @@ export default function UniverseBuilder({
               placeholder="🔍 Filtrar serie…"
               className="w-full border border-zinc-300 rounded px-2 py-1 mb-2 text-xs bg-white"
             />
-            <div className="flex gap-2 mb-2 text-[11px]">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-2 text-[11px]">
               <button
                 onClick={() => onSetAllActive(true)}
                 className="text-zinc-600 hover:text-zinc-900 underline"
               >
-                Activar todas
+                Todas
               </button>
-              <span className="text-zinc-300">·</span>
               <button
                 onClick={() => onSetAllActive(false)}
                 className="text-zinc-600 hover:text-zinc-900 underline"
               >
-                Desactivar todas
+                Ninguna
               </button>
+              <button
+                onClick={onInvert}
+                className="text-zinc-600 hover:text-zinc-900 underline"
+              >
+                Invertir
+              </button>
+              {librarySearch.trim() && (
+                <button
+                  onClick={() =>
+                    onActivateOnly(
+                      series
+                        .filter((s) =>
+                          s.name.toLowerCase().includes(librarySearch.trim().toLowerCase()),
+                        )
+                        .map((s) => s.id),
+                    )
+                  }
+                  className="text-brand-700 font-semibold hover:underline"
+                  title="Activar solo las que coinciden con el filtro y desactivar el resto"
+                >
+                  ✓ Solo las filtradas
+                </button>
+              )}
             </div>
             {(() => {
               const renderRow = (s: SeriesData) => {
@@ -839,47 +1223,25 @@ export default function UniverseBuilder({
                       setDragId(null);
                       setOverId(null);
                     }}
-                    className={`flex items-start gap-1.5 text-xs px-1 py-0.5 rounded transition-colors ${
-                      isHl ? "bg-amber-50 border-l-2 border-amber-400 pl-1.5" : ""
+                    onClick={() => onToggleActive(s.id)}
+                    title={isActive ? "Click para sacar del análisis" : "Click para incluir en el análisis"}
+                    className={`group flex items-center gap-2 text-xs pl-1.5 pr-1 py-1 rounded cursor-pointer transition-colors hover:bg-brand-50 border-l-2 ${
+                      isHl ? "bg-amber-50 border-amber-400" : "border-transparent"
                     } ${dragId === s.id ? "opacity-40" : ""} ${
-                      isDragOver ? "border-t-2 border-brand-700" : ""
-                    }`}
+                      isDragOver ? "border-t-2 border-t-brand-700" : ""
+                    } ${isActive ? "" : "opacity-45 hover:opacity-100"}`}
                   >
+                    {/* indicador de "en análisis" */}
                     <span
-                      className="cursor-grab active:cursor-grabbing text-zinc-300 hover:text-zinc-500 mt-0.5 select-none"
-                      title="Arrastrar para reordenar"
+                      className={`shrink-0 w-4 h-4 rounded-sm border flex items-center justify-center text-white text-[10px] leading-none ${
+                        isActive ? "bg-brand-700 border-brand-700" : "bg-white border-zinc-300"
+                      }`}
                     >
-                      ⋮⋮
+                      {isActive ? "✓" : ""}
                     </span>
-                    <input
-                      type="checkbox"
-                      checked={isActive}
-                      onChange={() => onToggleActive(s.id)}
-                      className="mt-1"
-                      title="Incluir en el análisis"
-                    />
-                    <button
-                      onClick={() => onToggleHighlight(s.id)}
-                      className={`mt-0.5 ${isHl ? "text-amber-500" : "text-zinc-300 hover:text-amber-500"}`}
-                      title={isHl ? "Quitar destaque" : "Destacar"}
-                    >
-                      {isHl ? "★" : "☆"}
-                    </button>
-                    <button
-                      onClick={() => downloadSeriesCSV(s)}
-                      className="text-zinc-400 hover:text-zinc-900 mt-0.5"
-                      title="Descargar Excel (.xlsx)"
-                    >
-                      ⬇
-                    </button>
-                    <button
-                      onClick={() => onRemove(s.id)}
-                      className="text-zinc-400 hover:text-red-600 mt-0.5"
-                      title="Borrar de la biblioteca"
-                    >
-                      ✕
-                    </button>
-                    <div className={`flex-1 leading-tight ${isActive ? "" : "opacity-50"}`}>
+
+                    {/* nombre */}
+                    <div className="flex-1 leading-tight min-w-0">
                       <div className="flex items-center gap-1 flex-wrap">
                         <span
                           className={`text-[9px] font-mono font-semibold px-1 py-px rounded ${sourceBadge(s).cls}`}
@@ -898,16 +1260,56 @@ export default function UniverseBuilder({
                           <span className="font-medium">{positions[0]}</span>
                           <span className="text-zinc-400">×</span>
                           <span className="font-medium">{positions[1]}</span>
-                          <span className="text-[10px] text-zinc-400 ml-1">({subPart})</span>
                         </div>
                       ) : (
-                        <div className="font-medium break-words">
-                          {positions[0]}
-                          {positions[0] !== subPart && (
-                            <span className="text-[10px] text-zinc-400 ml-1">({subPart})</span>
-                          )}
-                        </div>
+                        <div className="font-medium break-words">{positions[0]}</div>
                       )}
+                    </div>
+
+                    {/* acciones secundarias — aparecen al pasar el mouse */}
+                    <div
+                      className="shrink-0 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        onClick={() => onToggleHighlight(s.id)}
+                        className={isHl ? "text-amber-500" : "text-zinc-300 hover:text-amber-500"}
+                        title={isHl ? "Quitar destaque" : "Destacar en el gráfico"}
+                      >
+                        {isHl ? "★" : "☆"}
+                      </button>
+                      {(s.portfolio || s.id.startsWith("port::")) && (
+                        <button
+                          onClick={() => {
+                            setEditingPortfolioId(s.id);
+                            setTab("port");
+                          }}
+                          className="text-zinc-400 hover:text-brand-700"
+                          title="Editar cartera (componentes, pesos, rebalanceo)"
+                        >
+                          ✎
+                        </button>
+                      )}
+                      <button
+                        onClick={() => downloadSeriesCSV(s)}
+                        className="text-zinc-400 hover:text-zinc-900"
+                        title="Descargar Excel (.xlsx)"
+                      >
+                        ⬇
+                      </button>
+                      <button
+                        onClick={() => onRemove(s.id)}
+                        className="text-zinc-400 hover:text-red-600"
+                        title={isCollection ? "Quitar de la colección" : "Borrar de la biblioteca"}
+                      >
+                        ✕
+                      </button>
+                      <span
+                        className="cursor-grab active:cursor-grabbing text-zinc-300 hover:text-zinc-500 select-none"
+                        title="Arrastrar para reordenar"
+                      >
+                        ⋮⋮
+                      </span>
                     </div>
                   </li>
                 );
@@ -922,9 +1324,9 @@ export default function UniverseBuilder({
               const inactiveRows = filtered.filter((s) => s.active === false);
 
               return (
-                <div className="max-h-[50vh] overflow-y-auto pr-1">
+                <div className="pr-1">
                   <div className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded px-1.5 py-1 mb-1 mt-1 sticky top-0 z-10 border border-emerald-200">
-                    ✓ En análisis ({activeRows.length})
+                    ✓ {isCollection ? "En esta colección" : "En análisis"} ({activeRows.length})
                   </div>
                   {activeRows.length === 0 ? (
                     <p className="text-[11px] text-zinc-500 px-1 py-1 italic">
@@ -938,7 +1340,7 @@ export default function UniverseBuilder({
                     className="text-[11px] font-semibold text-zinc-600 bg-brand-50 rounded px-1.5 py-1 mb-1 flex items-center justify-between cursor-pointer hover:bg-zinc-200 sticky top-0 z-10 border border-zinc-200"
                     onClick={() => setShowInactive(!showInactive)}
                   >
-                    <span>○ Disponibles ({inactiveRows.length})</span>
+                    <span>○ {isCollection ? "Agregar del maestro" : "Disponibles"} ({inactiveRows.length})</span>
                     <span className="text-zinc-500">{showInactive ? "▾" : "▸"}</span>
                   </div>
                   {showInactive && inactiveRows.length > 0 && (
@@ -1003,13 +1405,43 @@ function OperationBuilder({
   onCreate: (s: SeriesData) => void;
   onError: (msg: string | null) => void;
 }) {
-  const needsB = opType !== "scale";
+  const needsB = opType !== "scale" && opType !== "weighted";
 
   const a = allSeries.find((s) => s.id === opAId) ?? allSeries[0];
   const b = needsB
     ? allSeries.find((s) => s.id === opBId && s.id !== a?.id) ??
       allSeries.find((s) => s.id !== a?.id)
     : undefined;
+
+  // Combinación ponderada de N activos (peso en % por id; estar en el objeto = miembro)
+  const [wWeights, setWWeights] = useState<Record<string, number>>({});
+  const wMembers = useMemo(
+    () => allSeries.filter((s) => s.id in wWeights).map((s) => ({ series: s, weight: wWeights[s.id] || 0 })),
+    [allSeries, wWeights],
+  );
+  const wTotal = wMembers.reduce((acc, m) => acc + m.weight, 0);
+  const wPreview = useMemo(
+    () => (opType === "weighted" ? portfolioReturns(wMembers, "monthly") : []),
+    [wMembers, opType],
+  );
+  function wToggle(id: string) {
+    setWWeights((prev) => {
+      const next = { ...prev };
+      if (id in next) delete next[id];
+      else { const n = Object.keys(next).length + 1; next[id] = Math.round((100 / n) * 100) / 100; }
+      return next;
+    });
+  }
+  function wSet(id: string, val: number) { setWWeights((prev) => ({ ...prev, [id]: val })); }
+  function wEqual() {
+    setWWeights((prev) => {
+      const ids = Object.keys(prev);
+      if (!ids.length) return prev;
+      const w = Math.round((100 / ids.length) * 100) / 100;
+      return Object.fromEntries(ids.map((id) => [id, w]));
+    });
+  }
+  const wAutoName = `Combinación (${wMembers.length} activo${wMembers.length === 1 ? "" : "s"})`;
 
   const auto = useMemo(() => {
     if (!a) return "";
@@ -1024,23 +1456,40 @@ function OperationBuilder({
   }, [a, b, opType, opWeight, opScalar, opOffsetPct]);
 
   const opLabel: Record<OpType, string> = {
-    diff: "Diferencia · r_A − r_B",
-    ratio: "Ratio wealth · (1+r_A)/(1+r_B) − 1",
-    sum: "Suma · r_A + r_B",
-    weighted: "Combinación ponderada · w·r_A + (1−w)·r_B",
-    scale: "Escala · c·r_A + offset",
+    diff: "Diferencia (long/short) · r_A − r_B",
+    ratio: "Ratio de riqueza (compuesto) · (1+r_A)/(1+r_B) − 1",
+    sum: "Suma / overlay · r_A + r_B",
+    weighted: "Cartera ponderada · Σ wᵢ·rᵢ",
+    scale: "Escala / leverage · c·r_A + offset",
+  };
+
+  // Naturaleza matemática de cada operación (para el badge y para no confundir
+  // "lineal" con "compuesto"). El compounding EN EL TIEMPO siempre ocurre
+  // después, al acumular la serie mensual a Base 100 con ∏(1+r).
+  const opKind: Record<OpType, "LINEAL" | "COMPUESTA" | "CARTERA"> = {
+    diff: "LINEAL",
+    ratio: "COMPUESTA",
+    sum: "LINEAL",
+    weighted: "CARTERA",
+    scale: "LINEAL",
   };
 
   const opDescription: Record<OpType, string> = {
     diff:
-      "Resta directa de retornos mes a mes: r_A − r_B. Es lo que define los factores académicos tipo SMB, HML, MOM. Equivale al P&L de un portafolio long $1 en A, short $1 en B rebalanceado cada mes.",
+      "Resta directa mes a mes: r_A − r_B. Es la construcción de los factores académicos (SMB, HML, MOM): el P&L de estar long $1 en A y short $1 en B, rebalanceado cada mes.",
     ratio:
-      "Es la versión 'compuesta' de la resta: en lugar de hacer r_A − r_B directo (que ignora el efecto compounding), calcula (1+r_A)/(1+r_B) − 1 cada mes. Acumulado en el tiempo te da EXACTAMENTE Wealth_A(t) / Wealth_B(t), o sea cuánto más vale A vs B en patrimonio acumulado. Para retornos chicos (<5%/mes) casi no se nota la diferencia con la resta simple; para meses con movimientos grandes sí importa.",
-    sum: "Suma simple de los dos retornos. Equivale a un portafolio largo $1 en A más largo $1 en B (notional total $2, no rebalanceado).",
+      "Cociente de riquezas: (1+r_A)/(1+r_B) − 1 cada mes. Acumulado da EXACTAMENTE Wealth_A(t)/Wealth_B(t) — cuánto más vale A que B en patrimonio. Es la versión geométrica de la diferencia; para retornos chicos (<~5%/mes) casi coincide con r_A − r_B, en meses grandes no.",
+    sum: "Suma mes a mes r_A + r_B, SIN el término cruzado r_A·r_B. Representa un overlay: estar 100% en A y además 100% en B (bruto 200%, apalancado). Sirve para sumarle a una base la pata de un factor. NO es una cartera: si querés “tener ambos” con pesos que sumen 100%, usá «Cartera ponderada». (No existe una “suma compuesta” de dos activos simultáneos: el producto (1+r_A)(1+r_B)−1 sería compounding secuencial en el tiempo, que no aplica acá.)",
     weighted:
-      "Promedio ponderado de los dos retornos con peso fijo w en A y (1−w) en B. Es un portafolio de pesos constantes rebalanceado cada mes.",
+      "La forma correcta de “tener varios activos a la vez” como cartera: r = Σ wᵢ·rᵢ con los pesos normalizados a 100%, rebalanceo mensual. Elegí activos y pesos abajo.",
     scale:
-      "Transforma la serie A multiplicándola por c y sumándole un offset mensual fijo. Usos típicos: c=2 simula leverage 2x · c=0.5 des-apalanca a la mitad · c=−1 invierte el signo (útil para 'short' lógico) · offset=−0.003 resta ~3.75% anual (rf) para obtener excess return. Combinaciones: c=1.5 + offset=−0.001 = leverage con costo de funding, etc.",
+      "Transforma A: c·r_A + offset mensual fijo. Usos: c=2 → leverage 2x · c=0.5 → des-apalanca · c=−1 → invierte el signo (short lógico) · offset=−0.003 → resta ~3.75% anual (rf) para excess return. Combinable: c=1.5 + offset=−0.001 = leverage con costo de funding.",
+  };
+
+  const opKindStyle: Record<string, string> = {
+    LINEAL: "bg-blue-50 text-blue-700 border-blue-200",
+    COMPUESTA: "bg-violet-50 text-violet-700 border-violet-200",
+    CARTERA: "bg-emerald-50 text-emerald-700 border-emerald-200",
   };
 
   return (
@@ -1058,24 +1507,38 @@ function OperationBuilder({
             </option>
           ))}
         </select>
-        <p className="text-[11px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded p-2 mt-1.5 leading-relaxed">
-          {opDescription[opType]}
-        </p>
+        <div className="bg-zinc-50 border border-zinc-200 rounded p-2 mt-1.5">
+          <div className="flex items-center gap-2 mb-1">
+            <span
+              className={`text-[9px] font-semibold px-1.5 py-0.5 rounded border ${opKindStyle[opKind[opType]]}`}
+            >
+              {opKind[opType]}
+            </span>
+            {opKind[opType] === "LINEAL" && (
+              <span className="text-[10px] text-zinc-400">
+                lineal mes a mes · el compounding en el tiempo lo aplica el Base 100
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-zinc-600 leading-relaxed">{opDescription[opType]}</p>
+        </div>
       </div>
 
-      <div>
-        <label className="block text-xs text-zinc-600 mb-1">Serie A</label>
-        <select
-          value={a?.id ?? ""}
-          onChange={(e) => setOpAId(e.target.value)}
-          className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
-        >
-          {allSeries.length === 0 && <option value="">(sin series)</option>}
-          {allSeries.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
-      </div>
+      {opType !== "weighted" && (
+        <div>
+          <label className="block text-xs text-zinc-600 mb-1">Serie A</label>
+          <select
+            value={a?.id ?? ""}
+            onChange={(e) => setOpAId(e.target.value)}
+            className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
+          >
+            {allSeries.length === 0 && <option value="">(sin series)</option>}
+            {allSeries.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {needsB && (
         <div>
@@ -1095,19 +1558,49 @@ function OperationBuilder({
       )}
 
       {opType === "weighted" && (
-        <div>
-          <label className="block text-xs text-zinc-600 mb-1">
-            Peso de A: {(opWeight * 100).toFixed(0)}% · Peso de B: {((1 - opWeight) * 100).toFixed(0)}%
-          </label>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={opWeight}
-            onChange={(e) => setOpWeight(Number(e.target.value))}
-            className="w-full"
-          />
+        <div className="space-y-2">
+          <label className="block text-xs text-zinc-600">Activos y pesos (se normalizan a 100%)</label>
+          <div className="border border-zinc-300 rounded bg-white max-h-56 overflow-y-auto divide-y divide-zinc-100">
+            {allSeries.length === 0 && (
+              <p className="text-xs text-zinc-500 px-2 py-2">Agregá series al universo primero.</p>
+            )}
+            {allSeries.map((s) => {
+              const isMember = s.id in wWeights;
+              const norm = isMember && wTotal > 0 ? (wWeights[s.id] / wTotal) * 100 : 0;
+              return (
+                <div key={s.id} className="flex items-center gap-2 px-2 py-1">
+                  <input type="checkbox" checked={isMember} onChange={() => wToggle(s.id)} />
+                  <span className="flex-1 text-xs break-words leading-tight">{s.name}</span>
+                  {isMember && (
+                    <div className="flex items-center gap-1 shrink-0">
+                      <input
+                        type="number"
+                        step={1}
+                        value={wWeights[s.id]}
+                        onChange={(e) => wSet(s.id, Number(e.target.value))}
+                        className="w-16 border border-zinc-300 rounded px-1.5 py-0.5 bg-white text-right tabular-nums text-xs"
+                      />
+                      <span className="text-[10px] text-zinc-400 w-9 text-right tabular-nums">{norm.toFixed(0)}%</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="flex items-center justify-between text-[11px] text-zinc-600">
+            <span>
+              {wMembers.length} activo{wMembers.length === 1 ? "" : "s"} · suma pesos{" "}
+              <b className="tabular-nums">{wTotal.toFixed(0)}</b>
+            </span>
+            <button onClick={wEqual} className="underline hover:text-zinc-900">Pesos iguales</button>
+          </div>
+          {wPreview.length > 0 ? (
+            <p className="text-[11px] text-zinc-500">
+              Backtest: <b>{wPreview.length}</b> meses · {wPreview[0].date} → {wPreview[wPreview.length - 1].date}.
+            </p>
+          ) : wMembers.length >= 2 ? (
+            <p className="text-[11px] text-amber-700">Sin meses en común entre los activos elegidos.</p>
+          ) : null}
         </div>
       )}
 
@@ -1139,16 +1632,31 @@ function OperationBuilder({
       <div>
         <label className="block text-xs text-zinc-600 mb-1">Nombre nuevo</label>
         <input
-          value={opName || auto}
+          value={opName || (opType === "weighted" ? wAutoName : auto)}
           onChange={(e) => setOpName(e.target.value)}
           className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
-          placeholder={auto || "Nombre"}
+          placeholder={(opType === "weighted" ? wAutoName : auto) || "Nombre"}
         />
       </div>
 
       <button
-        disabled={!a || (needsB && !b)}
+        disabled={
+          opType === "weighted"
+            ? wMembers.length < 2 || wPreview.length === 0
+            : !a || (needsB && !b)
+        }
         onClick={() => {
+          if (opType === "weighted") {
+            const returns = portfolioReturns(wMembers, "monthly");
+            if (returns.length === 0) {
+              onError("Sin meses en común entre los activos elegidos.");
+              return;
+            }
+            onError(null);
+            const name = (opName || wAutoName).trim() || "Combinación";
+            onCreate({ id: `op::${name}::${Date.now()}`, name, source: "custom", returns, active: true });
+            return;
+          }
           if (!a) return;
           if (needsB && !b) return;
           const returns = operate({
@@ -1188,17 +1696,47 @@ function OperationBuilder({
 
 function PortfolioBuilder({
   allSeries,
+  editing,
   onCreate,
+  onUpdate,
+  onCancelEdit,
   onError,
 }: {
   allSeries: SeriesData[];
+  editing: SeriesData | null;
   onCreate: (s: SeriesData) => void;
+  onUpdate: (s: SeriesData) => void;
+  onCancelEdit: () => void;
   onError: (msg: string | null) => void;
 }) {
   // peso en % por id; estar en el objeto = ser miembro de la cartera.
   const [weights, setWeights] = useState<Record<string, number>>({});
   const [name, setName] = useState("");
   const [search, setSearch] = useState("");
+  const [rebalance, setRebalance] = useState<RebalanceFreq>("monthly");
+
+  // Al entrar/salir de modo edición, cargar (o limpiar) la receta.
+  const editingId = editing?.id ?? null;
+  useEffect(() => {
+    if (editing?.portfolio) {
+      // cartera con receta: precargar componentes, pesos y rebalanceo
+      const w: Record<string, number> = {};
+      for (const m of editing.portfolio.members) w[m.id] = m.weight;
+      setWeights(w);
+      setName(editing.name);
+      setRebalance(editing.portfolio.rebalance);
+    } else if (editing) {
+      // cartera vieja sin receta: reconstruir en su lugar (mantener el nombre)
+      setWeights({});
+      setName(editing.name);
+      setRebalance("monthly");
+    } else {
+      setWeights({});
+      setName("");
+      setRebalance("monthly");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId]);
 
   const members = useMemo(
     () =>
@@ -1209,7 +1747,7 @@ function PortfolioBuilder({
   );
   const totalW = members.reduce((a, m) => a + m.weight, 0);
 
-  const preview = useMemo(() => portfolioReturns(members), [members]);
+  const preview = useMemo(() => portfolioReturns(members, rebalance), [members, rebalance]);
 
   const filtered = useMemo(
     () =>
@@ -1245,15 +1783,40 @@ function PortfolioBuilder({
     });
   }
 
-  const autoName = `Cartera (${members.length} activo${members.length === 1 ? "" : "s"})`;
+  const autoName = `Cartera (${members.length} activo${members.length === 1 ? "" : "s"}${
+    rebalance === "monthly" ? "" : ` · ${REBALANCE_LABEL[rebalance]}`
+  })`;
 
   return (
     <div className="space-y-3 text-sm">
-      <p className="text-[11px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded p-2 leading-relaxed">
-        Combiná varios activos con pesos fijos en una cartera rebalanceada cada mes
-        (<span className="font-mono">r = Σ wᵢ·rᵢ</span>). Los pesos se normalizan a 100%
-        automáticamente y el cálculo usa los meses en común a todos los miembros.
-      </p>
+      {editing ? (
+        <div className="text-[11px] bg-amber-50 border border-amber-300 rounded p-2 flex items-center justify-between gap-2">
+          <span className="text-amber-800">
+            {editing.portfolio ? (
+              <>
+                Editando <b>{editing.name}</b> — al guardar se actualiza esta misma cartera.
+              </>
+            ) : (
+              <>
+                Reconstruyendo <b>{editing.name}</b> (no tenía receta guardada): reseleccioná
+                componentes y pesos. Se guarda en su mismo lugar.
+              </>
+            )}
+          </span>
+          <button
+            onClick={onCancelEdit}
+            className="shrink-0 text-amber-700 underline hover:text-amber-900"
+          >
+            Cancelar
+          </button>
+        </div>
+      ) : (
+        <p className="text-[11px] text-zinc-600 bg-zinc-50 border border-zinc-200 rounded p-2 leading-relaxed">
+          Combiná varios activos con pesos fijos en una cartera con el rebalanceo que elijas
+          (<span className="font-mono">r = Σ wᵢ·rᵢ</span>). Los pesos se normalizan a 100%
+          automáticamente y el cálculo usa los meses en común a todos los miembros.
+        </p>
+      )}
 
       {allSeries.length === 0 ? (
         <p className="text-xs text-zinc-500">Agregá series al universo primero.</p>
@@ -1320,6 +1883,24 @@ function PortfolioBuilder({
           ) : null}
 
           <div>
+            <label className="block text-xs text-zinc-600 mb-1">Rebalanceo</label>
+            <select
+              value={rebalance}
+              onChange={(e) => setRebalance(e.target.value as RebalanceFreq)}
+              className="w-full border border-zinc-300 rounded px-2 py-1 bg-white"
+            >
+              <option value="monthly">Mensual — vuelve a los pesos cada mes</option>
+              <option value="quarterly">Trimestral — Ene/Abr/Jul/Oct</option>
+              <option value="annual">Anual — cada enero</option>
+              <option value="hold">Buy &amp; Hold — sin rebalanceo (pesos driftean)</option>
+            </select>
+            <p className="text-[11px] text-zinc-500 mt-1">
+              Cambia la trayectoria y el drawdown aunque los activos sean los mismos. Para
+              comparar contra Morningstar, igualá acá su frecuencia de rebalanceo.
+            </p>
+          </div>
+
+          <div>
             <label className="block text-xs text-zinc-600 mb-1">Nombre de la cartera</label>
             <input
               value={name || autoName}
@@ -1332,30 +1913,41 @@ function PortfolioBuilder({
           <button
             disabled={members.length < 2 || preview.length === 0}
             onClick={() => {
-              const returns = portfolioReturns(members);
+              const returns = portfolioReturns(members, rebalance);
               if (returns.length === 0) {
                 onError("Sin meses en común para armar la cartera.");
                 return;
               }
               onError(null);
               const finalName = (name || autoName).trim() || "Cartera";
-              onCreate({
-                id: `port::${finalName}::${Date.now()}`,
-                name: finalName,
-                source: "custom",
-                returns,
-                active: true,
-              });
-              setWeights({});
-              setName("");
+              const recipe = {
+                members: members.map((m) => ({ id: m.series.id, weight: m.weight })),
+                rebalance,
+              };
+              if (editing) {
+                onUpdate({ ...editing, name: finalName, returns, portfolio: recipe });
+              } else {
+                onCreate({
+                  id: `port::${finalName}::${Date.now()}`,
+                  name: finalName,
+                  source: "custom",
+                  returns,
+                  active: true,
+                  portfolio: recipe,
+                });
+                setWeights({});
+                setName("");
+              }
             }}
             className="w-full bg-brand-700 text-white text-sm py-1.5 rounded disabled:opacity-40"
           >
-            Crear cartera
+            {editing ? "Guardar cambios" : "Crear cartera"}
           </button>
           <p className="text-[11px] text-zinc-500">
-            Elegí al menos 2 activos. La cartera se guarda como una serie más y la podés usar
-            en correlaciones, ratio, Base 100, etc.
+            Elegí al menos 2 activos.{" "}
+            {editing
+              ? "Se recalcula y actualiza la cartera existente (mantiene su lugar y si está en el análisis)."
+              : "La cartera se guarda como una serie más y la podés usar en correlaciones, ratio, Base 100, etc."}
           </p>
         </>
       )}

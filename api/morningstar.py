@@ -14,9 +14,53 @@
 import json
 import os
 import traceback
+import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import parse_qs, urlparse
+
+
+def _kv_get_token():
+    """Lee el token de Morningstar desde Vercel KV (Upstash) vía su REST API.
+
+    El token se guarda desde la página (endpoint /api/ms-token) como
+    {"token": ..., "updatedAt": ...}. @upstash/redis puede almacenarlo con
+    una o dos capas de encoding JSON, así que desenrollamos con tolerancia.
+    Devuelve el token (str) o None si no hay / no se puede leer.
+    """
+    url = os.environ.get("KV_REST_API_URL")
+    tok = os.environ.get("KV_REST_API_TOKEN")
+    if not url or not tok:
+        return None
+    try:
+        req = urllib.request.Request(
+            f"{url.rstrip('/')}/get/correlations:ms:token",
+            headers={"Authorization": f"Bearer {tok}"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+    result = payload.get("result")
+    if result is None:
+        return None
+
+    # Desenrollar posibles capas de JSON hasta llegar a un dict o a un token.
+    for _ in range(3):
+        if isinstance(result, dict):
+            return result.get("token")
+        if isinstance(result, str):
+            s = result.strip()
+            try:
+                result = json.loads(s)
+                continue
+            except Exception:
+                return s or None
+        break
+    if isinstance(result, dict):
+        return result.get("token")
+    return None
 
 
 def _send(handler, payload, status=200):
@@ -48,11 +92,11 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
             end_date = datetime.utcnow().strftime("%Y-%m-%d")
             datapoint = "HP010"
 
-            # Accept the token under either name — MD_AUTH_TOKEN is the
-            # canonical one we read; "Authenticator" is also supported
-            # because that's how Morningstar Direct labels it in some flows
-            # and the user may add it under that name in Vercel.
-            token = (
+            # El token vence cada 24 h. Prioridad: el que se pegó en la página
+            # (guardado en KV) y, si no hay, las env vars como fallback.
+            # MD_AUTH_TOKEN es el nombre canónico; "Authenticator" también se
+            # acepta porque así lo etiqueta Morningstar Direct en algunos flujos.
+            token = _kv_get_token() or (
                 os.environ.get("MD_AUTH_TOKEN")
                 or os.environ.get("Authenticator")
                 or os.environ.get("AUTHENTICATOR")
@@ -61,8 +105,8 @@ class handler(BaseHTTPRequestHandler):  # noqa: N801 — Vercel expects lowercas
                 _send(
                     self,
                     {
-                        "error": "Token de Morningstar no configurado. Agregalo en "
-                        "Vercel como MD_AUTH_TOKEN o Authenticator."
+                        "error": "Token de Morningstar no configurado. Pegá un token "
+                        "fresco en la pestaña Morningstar de la página."
                     },
                     503,
                 )

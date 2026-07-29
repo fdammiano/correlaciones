@@ -1,4 +1,6 @@
-import type { ReturnPoint, SeriesData } from "./types";
+import type { ReturnPoint, SeriesData, RebalanceFreq } from "./types";
+
+export type { RebalanceFreq } from "./types";
 
 export type OpType = "diff" | "ratio" | "sum" | "weighted" | "scale";
 
@@ -64,13 +66,31 @@ export function operate(cfg: OpConfig): ReturnPoint[] {
 
 export type PortfolioMember = { series: SeriesData; weight: number };
 
+// Frecuencia con la que la cartera vuelve a los pesos objetivo (tipo en ./types):
+//  - monthly:   se rebalancea todos los meses (pesos siempre = objetivo).
+//  - quarterly: se rebalancea al inicio de cada trimestre calendario (Ene/Abr/Jul/Oct).
+//  - annual:    se rebalancea al inicio de cada año (Enero).
+//  - hold:      buy & hold, nunca se rebalancea (los pesos driftean con el mercado).
+export const REBALANCE_LABEL: Record<RebalanceFreq, string> = {
+  monthly: "Mensual",
+  quarterly: "Trimestral",
+  annual: "Anual",
+  hold: "Buy & Hold",
+};
+
 /**
- * Cartera de N activos con pesos fijos, rebalanceada cada mes:
- *   r_port(t) = Σ wᵢ·rᵢ(t)   con los pesos normalizados a que sumen 1.
+ * Cartera de N activos con pesos objetivo fijos y rebalanceo configurable:
+ *   r_port(t) = Σ wᵢ(t)·rᵢ(t)   con los pesos normalizados a que sumen 1.
+ * Entre fechas de rebalanceo los pesos driftean con el retorno de cada activo;
+ * en cada fecha de rebalanceo se resetean a los objetivos. Con "monthly" se
+ * resetean todos los meses ⇒ equivale a Σ wᵢ·rᵢ con pesos constantes.
  * Se calcula sobre los meses en común a TODOS los miembros con peso ≠ 0
  * (intersección de historias). Así el backtest arranca en la inception más tardía.
  */
-export function portfolioReturns(members: PortfolioMember[]): ReturnPoint[] {
+export function portfolioReturns(
+  members: PortfolioMember[],
+  freq: RebalanceFreq = "monthly",
+): ReturnPoint[] {
   const valid = members.filter((m) => m.weight !== 0 && m.series.returns.length > 0);
   if (valid.length === 0) return [];
   const totalW = valid.reduce((s, m) => s + m.weight, 0);
@@ -89,19 +109,36 @@ export function portfolioReturns(members: PortfolioMember[]): ReturnPoint[] {
   }
   dates.sort();
 
+  const target = maps.map((m) => m.w); // pesos objetivo (suman 1)
+  let w = [...target]; // pesos vigentes al inicio del mes
+  let first = true;
+
   const out: ReturnPoint[] = [];
   for (const d of dates) {
-    let v = 0;
-    let ok = true;
-    for (const { w, map } of maps) {
-      const r = map.get(d);
-      if (r == null || !Number.isFinite(r)) {
-        ok = false;
-        break;
+    const rs = maps.map((m) => m.map.get(d));
+    if (rs.some((r) => r == null || !Number.isFinite(r as number))) continue;
+
+    const month = parseInt(d.slice(5, 7), 10);
+    const isRebalance =
+      first ||
+      freq === "monthly" ||
+      (freq === "quarterly" && (month === 1 || month === 4 || month === 7 || month === 10)) ||
+      (freq === "annual" && month === 1);
+    if (isRebalance) w = [...target];
+
+    let rp = 0;
+    for (let i = 0; i < w.length; i++) rp += w[i] * (rs[i] as number);
+    if (!Number.isFinite(rp)) continue;
+    out.push({ date: d, value: rp });
+
+    // drift de los pesos para el mes siguiente (se renormalizan solos a 1)
+    const denom = 1 + rp;
+    if (denom !== 0) {
+      for (let i = 0; i < w.length; i++) {
+        w[i] = (w[i] * (1 + (rs[i] as number))) / denom;
       }
-      v += w * r;
     }
-    if (ok && Number.isFinite(v)) out.push({ date: d, value: v });
+    first = false;
   }
   return out;
 }
