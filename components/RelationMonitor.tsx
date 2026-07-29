@@ -14,15 +14,22 @@
 //   2) Reciente vs histórico (retorno anualizado del spread; signo opuesto = quiebre).
 //   3) Z-score del movimiento reciente vs su historia (|z| grande = extremo).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import PlotlyChart from "./PlotlyChart";
 import { operate } from "@/lib/operations";
 import { cumulativeWealth, summarize } from "@/lib/metrics";
+import { useRelations } from "@/lib/relations";
+import {
+  DEFAULT_ROC_WINDOWS,
+  fmtMonth,
+  headlines,
+  rocRank,
+  rocSeries,
+  structure,
+  zigzag,
+  type Swing,
+} from "@/lib/signals";
 import type { SeriesData } from "@/lib/types";
-
-const RELATIONS_KEY = "correlations-app:relations:v1";
-
-type Relation = { id: string; longId: string; shortId: string };
 
 type Signal = "ok" | "warn" | "break";
 
@@ -230,8 +237,8 @@ export default function RelationMonitor({
   const pool = library.length ? library : activeSeries;
   const byId = useMemo(() => new Map(pool.map((s) => [s.id, s])), [pool]);
 
-  const [relations, setRelations] = useState<Relation[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  // Las relaciones son estado compartido: el Radar también las agrega.
+  const { relations, add, remove } = useRelations();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [longSel, setLongSel] = useState("");
   const [shortSel, setShortSel] = useState("");
@@ -239,30 +246,18 @@ export default function RelationMonitor({
   const [recentMonths, setRecentMonths] = useState(6);
   const [maWindow, setMaWindow] = useState(12);
   const [zThreshold, setZThreshold] = useState(2);
+  const [zigThr, setZigThr] = useState(0.1);
+  const [rocK, setRocK] = useState(2);
 
-  // Cargar relaciones guardadas.
+  // Si aparece una relación nueva (típicamente agregada desde el Radar), pasa
+  // a ser la seleccionada para que su gráfico se vea sin buscarla.
+  const prevCount = useRef(0);
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(RELATIONS_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) setRelations(parsed);
-      }
-    } catch {
-      /* ignore */
+    if (relations.length > prevCount.current && relations.length > 0) {
+      setSelectedId(relations[relations.length - 1].id);
     }
-    setHydrated(true);
-  }, []);
-
-  // Guardar.
-  useEffect(() => {
-    if (!hydrated) return;
-    try {
-      localStorage.setItem(RELATIONS_KEY, JSON.stringify(relations));
-    } catch {
-      /* ignore */
-    }
-  }, [relations, hydrated]);
+    prevCount.current = relations.length;
+  }, [relations]);
 
   // Defaults del formulario de alta.
   useEffect(() => {
@@ -283,14 +278,56 @@ export default function RelationMonitor({
 
   const selected = rows.find((r) => r.rel.id === selectedId) || rows[0] || null;
 
+  // ── Detección sobre la relación seleccionada ──
+  // Zigzag de quiebres, titulares y ranking del ROC contra toda la historia.
+  const detect = useMemo(() => {
+    const st = selected?.stats;
+    if (!st?.ok || st.line.length < 6) return null;
+    const { line, dates } = st;
+    const zz = zigzag(line, dates, zigThr);
+    const marks: Swing[] = zz.pending ? [...zz.swings, zz.pending] : zz.swings;
+
+    // Piernas alcistas y bajistas como dos traces con nulls entre segmentos
+    // (así se colorea por dirección sin generar cientos de traces).
+    const pts = [{ i: 0, value: line[0] }, ...marks.map((s) => ({ i: s.i, value: s.value }))];
+    if (pts.at(-1)!.i !== line.length - 1) pts.push({ i: line.length - 1, value: line.at(-1)! });
+    const upX: (string | null)[] = [];
+    const upY: (number | null)[] = [];
+    const dnX: (string | null)[] = [];
+    const dnY: (number | null)[] = [];
+    for (let s = 0; s < pts.length - 1; s++) {
+      const from = pts[s];
+      const to = pts[s + 1];
+      const rising = to.value >= from.value;
+      const X = rising ? upX : dnX;
+      const Y = rising ? upY : dnY;
+      for (let i = from.i; i <= to.i; i++) {
+        X.push(dates[i]);
+        Y.push(line[i]);
+      }
+      X.push(null);
+      Y.push(null);
+    }
+
+    return {
+      zz,
+      marks: marks.slice(-14), // etiquetar sólo los últimos quiebres, para que se lea
+      upX, upY, dnX, dnY,
+      roc: rocSeries(line, rocK),
+      ranks: DEFAULT_ROC_WINDOWS.map((k) => rocRank(line, dates, k)),
+      current: rocRank(line, dates, rocK),
+      struct: structure(line, dates, zigThr),
+      heads: headlines(line, dates, { thr: zigThr }),
+      dates,
+    };
+  }, [selected, zigThr, rocK]);
+
   function addRelation() {
-    if (!longSel || !shortSel || longSel === shortSel) return;
-    const id = `r-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    setRelations((prev) => [...prev, { id, longId: longSel, shortId: shortSel }]);
-    setSelectedId(id);
+    const id = add(longSel, shortSel);
+    if (id) setSelectedId(id);
   }
   function removeRelation(id: string) {
-    setRelations((prev) => prev.filter((r) => r.id !== id));
+    remove(id);
   }
 
   const td = "px-2 py-1.5 text-[12px] tabular-nums whitespace-nowrap";
@@ -558,24 +595,101 @@ export default function RelationMonitor({
               </table>
             </div>
 
-            {/* Gráfico de la relación seleccionada: ratio Base 100 + media móvil */}
+            {/* Relación seleccionada: titulares + gráfico con quiebres + panel ROC */}
             {selected && selected.stats.ok && (
-              <div className="pt-1">
-                <p className="text-xs text-zinc-600 mb-1">
-                  <span className="text-emerald-700 font-semibold">{selected.long?.name}</span>
-                  <span className="text-zinc-400"> − </span>
-                  <span className="text-red-600 font-semibold">{selected.short?.name}</span>
-                  {" "}· spread compuesto acumulado (Base 100) con media móvil {maWindow}m
-                </p>
+              <div className="pt-2 border-t border-brand-200 space-y-2">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <p className="text-xs text-zinc-600">
+                    <span className="text-emerald-700 font-semibold">{selected.long?.name}</span>
+                    <span className="text-zinc-400"> − </span>
+                    <span className="text-red-600 font-semibold">{selected.short?.name}</span>
+                    {" "}· spread compuesto acumulado (Base 100), quiebres del {(zigThr * 100).toFixed(0)}% y MA {maWindow}m
+                  </p>
+                  <div className="flex items-end gap-2 text-sm">
+                    <div>
+                      <label className="block text-[10px] text-zinc-500 mb-0.5">Quiebre (zigzag)</label>
+                      <select
+                        value={zigThr}
+                        onChange={(e) => setZigThr(Number(e.target.value))}
+                        className="border border-zinc-300 rounded px-1.5 py-0.5 bg-white text-xs"
+                        title="Cuánto tiene que retroceder el spread para dar por confirmado un máximo o un mínimo"
+                      >
+                        {[0.05, 0.1, 0.15, 0.2, 0.3].map((n) => (
+                          <option key={n} value={n}>{(n * 100).toFixed(0)}%</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-zinc-500 mb-0.5">Panel ROC</label>
+                      <select
+                        value={rocK}
+                        onChange={(e) => setRocK(Number(e.target.value))}
+                        className="border border-zinc-300 rounded px-1.5 py-0.5 bg-white text-xs"
+                        title="Ventana del retorno acumulado que se grafica arriba y se rankea contra la historia"
+                      >
+                        {DEFAULT_ROC_WINDOWS.map((n) => (
+                          <option key={n} value={n}>{n} {n === 1 ? "mes" : "meses"}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Titulares detectados */}
+                {detect && detect.heads.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {detect.heads.slice(0, 4).map((h, i) => (
+                      <span
+                        key={i}
+                        className={`rounded border px-2 py-0.5 text-[11px] font-semibold ${
+                          h.tone === "up"
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                            : h.tone === "down"
+                            ? "bg-red-50 text-red-700 border-red-200"
+                            : "bg-zinc-50 text-zinc-600 border-zinc-200"
+                        }`}
+                      >
+                        {h.text}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <PlotlyChart
                   data={[
+                    // Panel de arriba: ROC de la ventana elegida.
+                    {
+                      type: "bar",
+                      name: `ROC ${rocK}m`,
+                      x: selected.stats.dates,
+                      y: detect?.roc ?? [],
+                      marker: {
+                        color: (detect?.roc ?? []).map((v) =>
+                          v == null ? "#d4d4d8" : v >= 0 ? "rgba(31,58,89,0.75)" : "rgba(220,38,38,0.75)",
+                        ),
+                      },
+                      yaxis: "y2",
+                      hovertemplate: `%{x|%Y-%m} · ROC ${rocK}m %{y:.1%}<extra></extra>`,
+                    },
+                    // Panel principal: piernas alcistas y bajistas del spread.
                     {
                       type: "scatter",
                       mode: "lines",
-                      name: "Spread acumulado (Base 100)",
-                      x: selected.stats.dates,
-                      y: selected.stats.line,
+                      name: "Piernas al alza",
+                      x: detect?.upX ?? selected.stats.dates,
+                      y: detect?.upY ?? selected.stats.line,
                       line: { color: "#1f3a59", width: 2 },
+                      connectgaps: false,
+                      hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra></extra>",
+                    },
+                    {
+                      type: "scatter",
+                      mode: "lines",
+                      name: "Piernas a la baja",
+                      x: detect?.dnX ?? [],
+                      y: detect?.dnY ?? [],
+                      line: { color: "#dc2626", width: 2 },
+                      connectgaps: false,
                       hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra></extra>",
                     },
                     {
@@ -587,11 +701,36 @@ export default function RelationMonitor({
                       line: { color: "#c79a3a", width: 1.5, dash: "dash" },
                       hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra></extra>",
                     },
+                    // Quiebres etiquetados (máximos y mínimos del zigzag).
+                    {
+                      type: "scatter",
+                      mode: "markers+text",
+                      name: "Quiebres",
+                      x: (detect?.marks ?? []).map((s) => s.date),
+                      y: (detect?.marks ?? []).map((s) => s.value),
+                      text: (detect?.marks ?? []).map((s) => s.value.toFixed(0)),
+                      textposition: (detect?.marks ?? []).map((s) => (s.kind === "H" ? "top center" : "bottom center")),
+                      textfont: { size: 9, color: "#52525b" },
+                      marker: {
+                        size: 6,
+                        symbol: (detect?.marks ?? []).map((s) => (s.kind === "H" ? "triangle-down" : "triangle-up")),
+                        color: (detect?.marks ?? []).map((s) => (s.pending ? "#a1a1aa" : s.kind === "H" ? "#dc2626" : "#059669")),
+                      },
+                      hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra>quiebre</extra>",
+                    },
                   ]}
                   layout={{
-                    yaxis: { title: "Spread acumulado (Base 100)" },
-                    xaxis: { title: "Fecha" },
-                    legend: { orientation: "h", y: -0.18 },
+                    yaxis: { title: "Spread acum. (Base 100)", domain: [0, 0.72] },
+                    yaxis2: {
+                      title: `ROC ${rocK}m`,
+                      domain: [0.79, 1],
+                      tickformat: ".0%",
+                      zeroline: true,
+                      zerolinecolor: "#9ca3af",
+                    },
+                    xaxis: { title: "Fecha", anchor: "y" },
+                    legend: { orientation: "h", y: -0.16 },
+                    bargap: 0,
                     shapes: [
                       {
                         type: "line",
@@ -604,8 +743,77 @@ export default function RelationMonitor({
                       },
                     ],
                   }}
-                  height={420}
+                  height={520}
                 />
+
+                {/* Ranking del ROC contra toda la historia */}
+                {detect && (
+                  <div className="rounded border border-brand-200 bg-white/70 px-3 py-2">
+                    <p className="text-[11px] font-semibold text-brand-800 mb-1">
+                      ¿Qué tan inédito es el movimiento? — ROC rankeado contra toda la historia del par
+                    </p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="border-b border-zinc-200 text-left">
+                            <th className="px-2 py-1 text-[10px] font-semibold text-zinc-500">Ventana</th>
+                            <th className="px-2 py-1 text-[10px] font-semibold text-zinc-500 text-right">Movimiento</th>
+                            <th className="px-2 py-1 text-[10px] font-semibold text-zinc-500 text-right" title="Percentil dentro de todas las lecturas históricas de esa misma ventana">
+                              Percentil
+                            </th>
+                            <th className="px-2 py-1 text-[10px] font-semibold text-zinc-500" title="Última vez que la relación se movió igual o más en la misma dirección y ventana (se excluyen las ventanas solapadas)">
+                              No se veía desde
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {detect.ranks.map((r) => (
+                            <tr
+                              key={r.k}
+                              className={`border-b border-zinc-100 ${r.k === rocK ? "bg-brand-50/60" : ""}`}
+                            >
+                              <td className="px-2 py-1 text-[11px] text-zinc-700">
+                                {r.k} {r.k === 1 ? "mes" : "meses"}
+                              </td>
+                              <td
+                                className={`px-2 py-1 text-[11px] tabular-nums text-right font-semibold ${
+                                  (r.value ?? 0) >= 0 ? "text-emerald-700" : "text-red-600"
+                                }`}
+                              >
+                                {fmtPct(r.value)}
+                              </td>
+                              <td className="px-2 py-1 text-[11px] tabular-nums text-right text-zinc-600">
+                                {r.pctile == null ? "—" : `p${Math.round(r.pctile * 100)}`}
+                              </td>
+                              <td className="px-2 py-1 text-[11px] text-zinc-700">
+                                {r.isRecord ? (
+                                  <span className="font-semibold text-brand-700">nunca — es récord histórico</span>
+                                ) : r.lastSimilarDate ? (
+                                  <>
+                                    {fmtMonth(r.lastSimilarDate)}
+                                    <span className="ml-1 text-[10px] text-zinc-400">
+                                      (hace {r.monthsSince} meses)
+                                    </span>
+                                  </>
+                                ) : (
+                                  "—"
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {detect.struct.low && detect.struct.high && (
+                      <p className="text-[10px] text-zinc-500 mt-1.5">
+                        Último mínimo: {fmtMonth(detect.struct.low.date)} ({fmtPct(detect.struct.fromLow)} desde ahí) ·
+                        último máximo: {fmtMonth(detect.struct.high.date)} ({fmtPct(detect.struct.fromHigh)} desde ahí)
+                        {detect.struct.lowerHighs === true && " · máximos descendentes"}
+                        {detect.struct.higherLows === true && " · mínimos ascendentes"}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 

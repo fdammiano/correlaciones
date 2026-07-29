@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import PlotlyChart from "./PlotlyChart";
 import RelationMonitor from "./RelationMonitor";
+import RelationRadar from "./RelationRadar";
 import {
   alignSeries,
   commonStartDate,
@@ -228,6 +229,10 @@ export default function ChartPanel({
 
       {monitorLibrary.length >= 2 && (
         <CorrelationMonitor activeSeries={inputSeries} library={monitorLibrary} />
+      )}
+
+      {monitorLibrary.length >= 2 && (
+        <RelationRadar activeSeries={inputSeries} library={monitorLibrary} />
       )}
 
       {monitorLibrary.length >= 2 && (
