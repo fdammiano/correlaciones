@@ -3,11 +3,14 @@
 // ── Monitor de relaciones (long-short) ──────────────────────────────────────
 // Debajo del Monitor de correlaciones. La idea: definir "relaciones" long/short
 // (una pierna long y otra short, cada una puede ser un factor suelto o una
-// cartera ya armada) y restarlas de forma COMPUESTA: ratio = (1+r_long)/(1+r_short)−1.
-// El acumulado de ese ratio (Base 100) muestra la performance relativa en el
-// tiempo. La tabla monitorea cuándo una relación "se rompe" con 3 señales
-// simultáneas + un semáforo combinado:
-//   1) Tendencia vs media móvil del ratio (cruce reciente = quiebre).
+// cartera ya armada) y RESTARLAS de forma compuesta, mes a mes:
+//     spread(t) = (1+r_long)/(1+r_short) − 1        ( ≈ r_long − r_short )
+// Es la resta de tasas hecha como corresponde (compuesta), NO una división de
+// niveles/precios: el resultado es el retorno mensual de estar long una pierna
+// y short la otra, financiado 1:1. El acumulado de ese spread (Base 100)
+// muestra la performance relativa en el tiempo. La tabla monitorea cuándo una
+// relación "se rompe" con 3 señales simultáneas + un semáforo combinado:
+//   1) Tendencia vs media móvil del acumulado (cruce reciente = quiebre).
 //   2) Reciente vs histórico (retorno anualizado del spread; signo opuesto = quiebre).
 //   3) Z-score del movimiento reciente vs su historia (|z| grande = extremo).
 
@@ -50,13 +53,34 @@ function fmtNum(v: number | null, d = 1): string {
   return v.toFixed(d);
 }
 
-const SIGNAL_DOT: Record<Signal, string> = { ok: "🟢", warn: "🟠", break: "🔴" };
 const SIGNAL_TEXT: Record<Signal, string> = { ok: "text-emerald-700", warn: "text-amber-600", break: "text-red-600" };
+const SIGNAL_CHIP: Record<Signal, string> = {
+  ok: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  warn: "bg-amber-50 text-amber-700 border-amber-200",
+  break: "bg-red-50 text-red-700 border-red-200",
+};
+
+// Chip de texto (reemplaza los puntitos de color: dice qué pasa, no sólo el color).
+function Chip({ signal, title, children }: { signal: Signal; title?: string; children: React.ReactNode }) {
+  return (
+    <span
+      title={title}
+      className={`inline-block rounded border px-1.5 py-0.5 text-[10px] font-semibold leading-none ${SIGNAL_CHIP[signal]}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+const RECENT_LABEL: Record<Signal, string> = { ok: "Confirma", warn: "Se debilita", break: "Se dio vuelta" };
+const VERDICT_LABEL: Record<Signal, string> = { ok: "En pie", warn: "Atención", break: "Quiebre" };
 
 type RelStats = {
   ok: boolean;
   n: number;
-  ratioNow: number | null; // Base 100 del ratio (último)
+  level: number | null; // último valor del acumulado (Base 100)
+  accum: number | null; // spread acumulado total en % desde el inicio
+  from: string | null; // primera fecha con datos en común
   baseAnn: number | null; // retorno anualizado del spread (todo el historial)
   recentAnn: number | null; // retorno anualizado del spread reciente
   aboveMA: boolean | null;
@@ -66,7 +90,7 @@ type RelStats = {
   sRecent: Signal;
   sZ: Signal;
   verdict: Signal;
-  line: number[]; // ratio Base 100
+  line: number[]; // spread acumulado, Base 100
   ma: (number | null)[];
   dates: string[];
 };
@@ -79,28 +103,32 @@ function computeRelation(
   zThreshold: number,
 ): RelStats {
   const empty: RelStats = {
-    ok: false, n: 0, ratioNow: null, baseAnn: null, recentAnn: null,
+    ok: false, n: 0, level: null, accum: null, from: null, baseAnn: null, recentAnn: null,
     aboveMA: null, crossed: false, z: null,
     sTrend: "ok", sRecent: "ok", sZ: "ok", verdict: "ok",
     line: [], ma: [], dates: [],
   };
   if (!long || !short) return empty;
 
-  // Spread compuesto mensual: (1+r_long)/(1+r_short) − 1 (intersección de fechas).
+  // Resta COMPUESTA mes a mes: (1+r_long)/(1+r_short) − 1 (intersección de fechas).
+  // `operate({type:"ratio"})` es exactamente esa resta compuesta de tasas, no una
+  // división de niveles ni de precios.
   const spread = operate({ type: "ratio", a: long, b: short });
   if (spread.length < 3) return { ...empty, n: spread.length };
 
-  // Ratio acumulado Base 100 (performance relativa long vs short).
+  // Spread acumulado Base 100 (performance relativa long vs short).
   const wealth = cumulativeWealth(spread, 100);
   const dates = wealth.map((p) => p.date);
   const line = wealth.map((p) => p.value);
   const ma = sma(line, maWindow);
 
-  const ratioNow = line.at(-1) ?? null;
+  const level = line.at(-1) ?? null;
+  const accum = level != null ? level / 100 - 1 : null;
+  const from = dates[0] ?? null;
   const lastMa = ma.at(-1) ?? null;
-  const aboveMA = ratioNow != null && lastMa != null ? ratioNow >= lastMa : null;
+  const aboveMA = level != null && lastMa != null ? level >= lastMa : null;
 
-  // Cruce del ratio con su MA dentro de la ventana reciente → quiebre de tendencia.
+  // Cruce del acumulado con su MA dentro de la ventana reciente → quiebre de tendencia.
   let crossed = false;
   let lastSign: number | null = null;
   const startCross = Math.max(0, line.length - recentMonths);
@@ -164,7 +192,7 @@ function computeRelation(
   else verdict = "ok";
 
   return {
-    ok: true, n: spread.length, ratioNow, baseAnn, recentAnn,
+    ok: true, n: spread.length, level, accum, from, baseAnn, recentAnn,
     aboveMA, crossed, z, sTrend, sRecent, sZ, verdict, line, ma, dates,
   };
 }
@@ -256,9 +284,27 @@ export default function RelationMonitor({
 
       <div className="px-4 pb-4 pt-1 space-y-3">
         <p className="text-[11px] text-zinc-500 leading-relaxed">
-          Cada relación es un <b>ratio compuesto</b> long ÷ short: (1+r<sub>long</sub>)/(1+r<sub>short</sub>)−1, acumulado en Base 100.
-          Si sube, el <b>long</b> le gana al <b>short</b>. Las columnas monitorean cuándo la relación se rompe.
+          Cada relación es la <b>resta compuesta</b> de las dos piernas, mes a mes:{" "}
+          <span className="font-mono text-zinc-600">spread = (1+r<sub>long</sub>)/(1+r<sub>short</sub>) − 1</span>{" "}
+          — la resta de tasas hecha como corresponde (compuesta), <b>no</b> una división de niveles ni de precios. Es el
+          retorno de estar long una pierna y short la otra, financiado 1:1. Ese spread se acumula en Base 100: si sube,
+          el <b className="text-emerald-700">long</b> le gana al <b className="text-red-600">short</b>.
         </p>
+
+        <details className="rounded border border-brand-200 bg-white/70">
+          <summary className="cursor-pointer select-none px-3 py-1.5 text-[11px] font-semibold text-brand-800">
+            ¿Cómo leo cada columna?
+          </summary>
+          <div className="px-3 pb-2.5 pt-0.5 text-[11px] text-zinc-600 leading-relaxed space-y-1">
+            <p><b>Acumulado</b> — cuánto rindió el spread desde el primer mes en común de las dos piernas. +50% = la pata long le ganó 50% acumulado a la short. Entre paréntesis, el nivel Base 100 (arranca en 100).</p>
+            <p><b>Spread hist. (a/a)</b> — ese mismo spread pero anualizado sobre <i>toda</i> la historia. Es el “rendimiento normal” de la relación: cuánto le suele ganar el long al short por año.</p>
+            <p><b>Spread {recentMonths}m (a/a)</b> — lo mismo pero sólo con los últimos {recentMonths} meses, anualizado. Sirve para comparar contra la columna anterior: es lo que está pasando <i>ahora</i>.</p>
+            <p><b>Tendencia</b> — dónde está el acumulado respecto de su media móvil de {maWindow}m. ▲ arriba (la relación sigue funcionando), ▼ abajo. Si dice <b>cruce</b>, atravesó la media dentro de los últimos {recentMonths} meses: cambio de régimen.</p>
+            <p><b>Reciente vs hist.</b> — compara las dos columnas de spread: <i>Confirma</i> si el reciente va en el mismo sentido y con fuerza parecida al histórico, <i>Se debilita</i> si conserva el signo pero rinde menos de la mitad, <i>Se dio vuelta</i> si cambió de signo (el short le está ganando al long cuando históricamente perdía, o al revés).</p>
+            <p><b>Z</b> — cuántos desvíos estándar se apartó el spread mensual promedio de los últimos {recentMonths}m respecto de su media histórica. |z| ≥ 1 llama la atención, |z| ≥ {zThreshold} es un extremo estadístico (o quiebre, o punto de reversión).</p>
+            <p><b>Estado</b> — resumen de las tres señales: <i>Quiebre</i> con 2+ en rojo, <i>Atención</i> con 1 roja o 2 naranjas, <i>En pie</i> el resto.</p>
+          </div>
+        </details>
 
         {/* Controles globales */}
         <div className="flex flex-wrap items-end gap-3 text-sm border-b border-brand-200 pb-3">
@@ -349,14 +395,26 @@ export default function RelationMonitor({
               <table className="w-full border-collapse">
                 <thead>
                   <tr className="border-b border-brand-200 text-left">
-                    <th className={th}>Relación (Long ÷ Short)</th>
-                    <th className={`${th} text-right`}>Ratio</th>
-                    <th className={`${th} text-right`}>Base (a/a)</th>
-                    <th className={`${th} text-right`}>Reciente (a/a)</th>
-                    <th className={`${th} text-center`} title="Tendencia del ratio vs su media móvil (cruce reciente = quiebre)">Tend.</th>
-                    <th className={`${th} text-center`} title="Retorno reciente vs histórico (signo opuesto = quiebre)">Rec/Hist</th>
-                    <th className={`${th} text-center`} title="Cuántos desvíos se movió el spread reciente vs su historia">Z</th>
-                    <th className={`${th} text-center`} title="Semáforo combinado de las 3 señales">Quiebre</th>
+                    <th className={th}>Relación (Long − Short, compuesta)</th>
+                    <th className={`${th} text-right`} title="Spread compuesto acumulado desde el primer mes en común (y nivel Base 100)">
+                      Acumulado
+                    </th>
+                    <th className={`${th} text-right`} title="Spread compuesto anualizado sobre toda la historia">
+                      Spread hist. (a/a)
+                    </th>
+                    <th className={`${th} text-right`} title={`Spread compuesto anualizado de los últimos ${recentMonths} meses`}>
+                      Spread {recentMonths}m (a/a)
+                    </th>
+                    <th className={`${th} text-center`} title={`Acumulado vs su media móvil de ${maWindow}m (cruce dentro de los últimos ${recentMonths}m = quiebre)`}>
+                      Tendencia
+                    </th>
+                    <th className={`${th} text-center`} title="Compara el spread reciente con el histórico: mismo signo y fuerza / se debilita / signo opuesto">
+                      Reciente vs hist.
+                    </th>
+                    <th className={`${th} text-center`} title={`Desvíos del spread promedio de los últimos ${recentMonths}m vs su media histórica`}>
+                      Z
+                    </th>
+                    <th className={`${th} text-center`} title="Resumen de las 3 señales">Estado</th>
                     <th className={th}></th>
                   </tr>
                 </thead>
@@ -371,11 +429,17 @@ export default function RelationMonitor({
                       >
                         <td className={`${td} whitespace-normal`}>
                           <span className="text-emerald-700 font-medium">{long?.name ?? "?"}</span>
-                          <span className="text-zinc-400"> ÷ </span>
+                          <span className="text-zinc-400"> − </span>
                           <span className="text-red-600 font-medium">{short?.name ?? "?"}</span>
                           {!stats.ok && <span className="ml-1 text-[10px] text-zinc-400">(sin datos)</span>}
                         </td>
-                        <td className={`${td} text-right`}>{fmtNum(stats.ratioNow, 1)}</td>
+                        <td
+                          className={`${td} text-right ${stats.accum != null && stats.accum < 0 ? "text-red-600" : "text-zinc-800"}`}
+                          title={stats.from ? `Desde ${stats.from} · ${stats.n} meses en común` : undefined}
+                        >
+                          {fmtPct(stats.accum)}
+                          <span className="ml-1 text-[10px] text-zinc-400">({fmtNum(stats.level, 1)})</span>
+                        </td>
                         <td className={`${td} text-right ${stats.baseAnn != null && stats.baseAnn < 0 ? "text-red-600" : "text-zinc-800"}`}>
                           {fmtPct(stats.baseAnn)}
                         </td>
@@ -383,14 +447,28 @@ export default function RelationMonitor({
                           {fmtPct(stats.recentAnn)}
                         </td>
                         <td className={`${td} text-center`}>
-                          <span className={SIGNAL_TEXT[stats.sTrend]}>
-                            {stats.aboveMA == null ? "—" : stats.aboveMA ? "▲" : "▼"}
-                            {stats.crossed ? " ⚡" : ""}
-                          </span>
+                          {stats.aboveMA == null ? (
+                            <span className="text-zinc-400">—</span>
+                          ) : (
+                            <Chip
+                              signal={stats.sTrend}
+                              title={
+                                (stats.aboveMA ? `Acumulado por encima de su MA ${maWindow}m` : `Acumulado por debajo de su MA ${maWindow}m`) +
+                                (stats.crossed ? ` · cruzó la media en los últimos ${recentMonths}m` : "")
+                              }
+                            >
+                              {stats.aboveMA ? "▲ arriba" : "▼ abajo"}
+                              {stats.crossed ? " · cruce" : ""}
+                            </Chip>
+                          )}
                         </td>
-                        <td className={`${td} text-center`}>{SIGNAL_DOT[stats.sRecent]}</td>
+                        <td className={`${td} text-center`}>
+                          <Chip signal={stats.sRecent}>{RECENT_LABEL[stats.sRecent]}</Chip>
+                        </td>
                         <td className={`${td} text-center ${SIGNAL_TEXT[stats.sZ]}`}>{fmtNum(stats.z, 1)}</td>
-                        <td className={`${td} text-center`}>{SIGNAL_DOT[stats.verdict]}</td>
+                        <td className={`${td} text-center`}>
+                          <Chip signal={stats.verdict}>{VERDICT_LABEL[stats.verdict]}</Chip>
+                        </td>
                         <td className={`${td} text-right`}>
                           <button
                             onClick={(e) => { e.stopPropagation(); removeRelation(rel.id); }}
@@ -412,16 +490,16 @@ export default function RelationMonitor({
               <div className="pt-1">
                 <p className="text-xs text-zinc-600 mb-1">
                   <span className="text-emerald-700 font-semibold">{selected.long?.name}</span>
-                  <span className="text-zinc-400"> ÷ </span>
+                  <span className="text-zinc-400"> − </span>
                   <span className="text-red-600 font-semibold">{selected.short?.name}</span>
-                  {" "}· ratio compuesto Base 100 con media móvil {maWindow}m
+                  {" "}· spread compuesto acumulado (Base 100) con media móvil {maWindow}m
                 </p>
                 <PlotlyChart
                   data={[
                     {
                       type: "scatter",
                       mode: "lines",
-                      name: "Ratio (Base 100)",
+                      name: "Spread acumulado (Base 100)",
                       x: selected.stats.dates,
                       y: selected.stats.line,
                       line: { color: "#1f3a59", width: 2 },
@@ -438,7 +516,7 @@ export default function RelationMonitor({
                     },
                   ]}
                   layout={{
-                    yaxis: { title: "Ratio (Base 100)" },
+                    yaxis: { title: "Spread acumulado (Base 100)" },
                     xaxis: { title: "Fecha" },
                     legend: { orientation: "h", y: -0.18 },
                     shapes: [
@@ -460,10 +538,10 @@ export default function RelationMonitor({
 
             {/* Leyenda */}
             <p className="text-[11px] text-zinc-500 leading-relaxed">
-              <b>Tend.</b>: ▲ el ratio está sobre su media móvil, ▼ debajo; <b>⚡</b> = cruzó dentro de la ventana reciente (quiebre de tendencia).{" "}
-              <b>Rec/Hist</b>: 🟢 el reciente confirma al histórico · 🟠 se debilita · 🔴 signo opuesto.{" "}
-              <b>Z</b>: desvíos del movimiento reciente vs su historia (🟠 |z|≥1 · 🔴 |z|≥{zThreshold}).{" "}
-              <b>Quiebre</b>: semáforo combinado (🔴 = 2+ señales en rojo · 🟠 = 1 roja o 2 naranjas).
+              <b>Verde</b> = la relación funciona como históricamente · <b>naranja</b> = se está debilitando ·{" "}
+              <b>rojo</b> = quiebre. <b>Tendencia</b>: ▲ el acumulado está sobre su MA {maWindow}m, ▼ debajo;{" "}
+              <i>cruce</i> = la atravesó en los últimos {recentMonths}m. <b>Z</b>: naranja |z|≥1 · rojo |z|≥{zThreshold}.{" "}
+              El detalle de cada columna está arriba, en “¿Cómo leo cada columna?”.
             </p>
           </>
         )}
