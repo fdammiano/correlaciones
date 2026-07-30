@@ -1211,12 +1211,6 @@ export default function UniverseBuilder({
                 return (
                   <li
                     key={s.id}
-                    draggable
-                    onDragStart={(e) => {
-                      setDragId(s.id);
-                      e.dataTransfer.effectAllowed = "move";
-                      e.dataTransfer.setData("text/plain", s.id);
-                    }}
                     onDragOver={(e) => {
                       e.preventDefault();
                       if (dragId && dragId !== s.id) setOverId(s.id);
@@ -1316,6 +1310,12 @@ export default function UniverseBuilder({
                         ✕
                       </button>
                       <span
+                        draggable
+                        onDragStart={(e) => {
+                          setDragId(s.id);
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", s.id);
+                        }}
                         className="cursor-grab active:cursor-grabbing text-zinc-300 hover:text-zinc-500 select-none"
                         title="Arrastrar para reordenar"
                       >
