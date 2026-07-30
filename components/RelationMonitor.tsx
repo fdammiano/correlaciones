@@ -248,6 +248,7 @@ export default function RelationMonitor({
   const [zThreshold, setZThreshold] = useState(2);
   const [zigThr, setZigThr] = useState(0.1);
   const [rocK, setRocK] = useState(2);
+  const [logScale, setLogScale] = useState(true);
 
   // Si aparece una relación nueva (típicamente agregada desde el Radar), pasa
   // a ser la seleccionada para que su gráfico se vea sin buscarla.
@@ -632,6 +633,23 @@ export default function RelationMonitor({
                         ))}
                       </select>
                     </div>
+                    <div>
+                      <label className="block text-[10px] text-zinc-500 mb-0.5">Escala</label>
+                      <div className="inline-flex rounded border border-zinc-300 overflow-hidden text-xs" title="En log, subidas y bajadas porcentuales iguales miden igual (como StockCharts)">
+                        <button
+                          onClick={() => setLogScale(false)}
+                          className={`px-2 py-0.5 ${!logScale ? "bg-brand-700 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+                        >
+                          Lineal
+                        </button>
+                        <button
+                          onClick={() => setLogScale(true)}
+                          className={`px-2 py-0.5 border-l border-zinc-300 ${logScale ? "bg-brand-700 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+                        >
+                          Log
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -720,7 +738,7 @@ export default function RelationMonitor({
                     },
                   ]}
                   layout={{
-                    yaxis: { title: "Spread acum. (Base 100)", domain: [0, 0.72] },
+                    yaxis: { title: "Spread acum. (Base 100)", domain: [0, 0.72], type: logScale ? "log" : "linear" },
                     yaxis2: {
                       title: `ROC ${rocK}m`,
                       domain: [0.79, 1],
@@ -737,14 +755,21 @@ export default function RelationMonitor({
                         xref: "paper",
                         x0: 0,
                         x1: 1,
-                        y0: 100,
-                        y1: 100,
+                        // En eje log, Plotly toma la coordenada como log10 del valor.
+                        y0: logScale ? 2 : 100,
+                        y1: logScale ? 2 : 100,
                         line: { color: "#9ca3af", width: 1, dash: "dot" },
                       },
                     ],
                   }}
                   height={520}
                 />
+
+                <p className="text-[11px] text-zinc-500 leading-relaxed">
+                  <b>Retorno total</b> (dividendos reinvertidos), Base 100 desde {selected.stats.from ? fmtMonth(selected.stats.from) : "el inicio"}.
+                  Un <b>ratio de precios</b> (ej. StockCharts XLE:XLK) difiere porque no cuenta los dividendos, mayores en energía que en tecnología.
+                  {" "}Escala {logScale ? "logarítmica (subas/bajas % iguales miden igual)" : "lineal"}.
+                </p>
 
                 {/* Ranking del ROC contra toda la historia */}
                 {detect && (
