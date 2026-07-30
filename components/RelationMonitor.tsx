@@ -249,6 +249,7 @@ export default function RelationMonitor({
   const [zigThr, setZigThr] = useState(0.1);
   const [rocK, setRocK] = useState(1);
   const [logScale, setLogScale] = useState(true);
+  const [rebaseFrom, setRebaseFrom] = useState(""); // YYYY-MM; "" = inception
 
   // Si aparece una relación nueva (típicamente agregada desde el Radar), pasa
   // a ser la seleccionada para que su gráfico se vea sin buscarla.
@@ -339,6 +340,17 @@ export default function RelationMonitor({
   function removeRelation(id: string) {
     remove(id);
   }
+
+  // Factor de rebase: si se elige un mes, el acumulado se reescala para que ese
+  // mes valga 100 (como pararse ahí y compounder desde ahí). Es un factor
+  // constante: no cambia ninguna señal (ROC, zigzag, z-score son % / invariantes
+  // a escala), sólo el nivel del eje — así coincide con tu Excel.
+  const rebaseF = (() => {
+    if (!rebaseFrom || !selected?.stats.ok) return 1;
+    const { line, dates } = selected.stats;
+    const i = dates.findIndex((d) => d.slice(0, 7) >= rebaseFrom);
+    return i >= 0 && line[i] ? 100 / line[i] : 1;
+  })();
 
   const td = "px-2 py-1.5 text-[12px] tabular-nums whitespace-nowrap";
 
@@ -659,6 +671,22 @@ export default function RelationMonitor({
                         </button>
                       </div>
                     </div>
+                    <div>
+                      <label className="block text-[10px] text-zinc-500 mb-0.5">Base 100 en</label>
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="month"
+                          value={rebaseFrom}
+                          min={selected.stats.from ? selected.stats.from.slice(0, 7) : undefined}
+                          onChange={(e) => setRebaseFrom(e.target.value)}
+                          className="border border-zinc-300 rounded px-1.5 py-0.5 bg-white text-xs"
+                          title="Poné 100 en este mes y compounder desde ahí (como en tu Excel). Vacío = desde la inception."
+                        />
+                        {rebaseFrom && (
+                          <button onClick={() => setRebaseFrom("")} className="text-zinc-400 hover:text-zinc-700 text-xs" title="Volver a inception">✕</button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -701,7 +729,7 @@ export default function RelationMonitor({
                       mode: "lines",
                       name: "Piernas al alza",
                       x: detect?.upX ?? selected.stats.dates,
-                      y: detect?.upY ?? selected.stats.line,
+                      y: (detect?.upY ?? selected.stats.line).map((v) => (v == null ? null : v * rebaseF)),
                       line: { color: "#111827", width: 1.6 },
                       connectgaps: false,
                       hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra></extra>",
@@ -711,7 +739,7 @@ export default function RelationMonitor({
                       mode: "lines",
                       name: "Piernas a la baja",
                       x: detect?.dnX ?? [],
-                      y: detect?.dnY ?? [],
+                      y: (detect?.dnY ?? []).map((v) => (v == null ? null : v * rebaseF)),
                       line: { color: "#dc2626", width: 1.6 },
                       connectgaps: false,
                       hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra></extra>",
@@ -721,7 +749,7 @@ export default function RelationMonitor({
                       mode: "lines",
                       name: `MA ${maWindow}m`,
                       x: selected.stats.dates,
-                      y: selected.stats.ma,
+                      y: selected.stats.ma.map((v) => (v == null ? null : v * rebaseF)),
                       line: { color: "#c79a3a", width: 1.25, dash: "dash" },
                       hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra></extra>",
                     },
@@ -742,8 +770,8 @@ export default function RelationMonitor({
                     annotations: (detect?.marks ?? []).map((s) => ({
                       x: s.date,
                       // En eje log, las anotaciones también van en log10 del valor.
-                      y: logScale ? Math.log10(s.value) : s.value,
-                      text: s.value.toFixed(0),
+                      y: logScale ? Math.log10(s.value * rebaseF) : s.value * rebaseF,
+                      text: (s.value * rebaseF).toFixed(rebaseF === 1 ? 0 : 1),
                       showarrow: false,
                       yshift: s.kind === "H" ? 10 : -10,
                       font: { size: 9, color: "#111827" },
@@ -769,9 +797,9 @@ export default function RelationMonitor({
                 />
 
                 <p className="text-[11px] text-zinc-500 leading-relaxed">
-                  <b>Retorno total</b> (dividendos reinvertidos), Base 100 desde {selected.stats.from ? fmtMonth(selected.stats.from) : "el inicio"}.
-                  Un <b>ratio de precios</b> (ej. StockCharts XLE:XLK) difiere porque no cuenta los dividendos, mayores en energía que en tecnología.
-                  {" "}Escala {logScale ? "logarítmica (subas/bajas % iguales miden igual)" : "lineal"}.
+                  <b>Retorno total</b> (dividendos reinvertidos). <b>Base 100 en {rebaseFrom ? fmtMonth(rebaseFrom + "-01") : (selected.stats.from ? fmtMonth(selected.stats.from) : "el inicio")}</b>
+                  {rebaseFrom ? " (rebasado a ese mes, como en tu Excel)" : " (inception del par)"}.
+                  {" "}Cambiar el mes sólo reescala el nivel; no altera ROC, quiebres ni z-score. Escala {logScale ? "logarítmica" : "lineal"}.
                 </p>
 
                 {/* Ranking del ROC contra toda la historia */}
