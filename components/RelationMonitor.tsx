@@ -247,7 +247,7 @@ export default function RelationMonitor({
   const [maWindow, setMaWindow] = useState(12);
   const [zThreshold, setZThreshold] = useState(2);
   const [zigThr, setZigThr] = useState(0.1);
-  const [rocK, setRocK] = useState(2);
+  const [rocK, setRocK] = useState(1);
   const [logScale, setLogScale] = useState(true);
 
   // Si aparece una relación nueva (típicamente agregada desde el Radar), pasa
@@ -675,28 +675,25 @@ export default function RelationMonitor({
 
                 <PlotlyChart
                   data={[
-                    // Panel de arriba: ROC de la ventana elegida.
+                    // Panel de arriba: ROC como línea (estilo StockCharts ROC(1)).
                     {
-                      type: "bar",
+                      type: "scatter",
+                      mode: "lines",
                       name: `ROC ${rocK}m`,
                       x: selected.stats.dates,
                       y: detect?.roc ?? [],
-                      marker: {
-                        color: (detect?.roc ?? []).map((v) =>
-                          v == null ? "#d4d4d8" : v >= 0 ? "rgba(31,58,89,0.75)" : "rgba(220,38,38,0.75)",
-                        ),
-                      },
+                      line: { color: "#111827", width: 1 },
                       yaxis: "y2",
                       hovertemplate: `%{x|%Y-%m} · ROC ${rocK}m %{y:.1%}<extra></extra>`,
                     },
-                    // Panel principal: piernas alcistas y bajistas del spread.
+                    // Panel principal: piernas alcistas (negro) y bajistas (rojo).
                     {
                       type: "scatter",
                       mode: "lines",
                       name: "Piernas al alza",
                       x: detect?.upX ?? selected.stats.dates,
                       y: detect?.upY ?? selected.stats.line,
-                      line: { color: "#1f3a59", width: 2 },
+                      line: { color: "#111827", width: 1.6 },
                       connectgaps: false,
                       hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra></extra>",
                     },
@@ -706,7 +703,7 @@ export default function RelationMonitor({
                       name: "Piernas a la baja",
                       x: detect?.dnX ?? [],
                       y: detect?.dnY ?? [],
-                      line: { color: "#dc2626", width: 2 },
+                      line: { color: "#dc2626", width: 1.6 },
                       connectgaps: false,
                       hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra></extra>",
                     },
@@ -716,39 +713,36 @@ export default function RelationMonitor({
                       name: `MA ${maWindow}m`,
                       x: selected.stats.dates,
                       y: selected.stats.ma,
-                      line: { color: "#c79a3a", width: 1.5, dash: "dash" },
+                      line: { color: "#c79a3a", width: 1.25, dash: "dash" },
                       hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra></extra>",
-                    },
-                    // Quiebres etiquetados (máximos y mínimos del zigzag).
-                    {
-                      type: "scatter",
-                      mode: "markers+text",
-                      name: "Quiebres",
-                      x: (detect?.marks ?? []).map((s) => s.date),
-                      y: (detect?.marks ?? []).map((s) => s.value),
-                      text: (detect?.marks ?? []).map((s) => s.value.toFixed(0)),
-                      textposition: (detect?.marks ?? []).map((s) => (s.kind === "H" ? "top center" : "bottom center")),
-                      textfont: { size: 9, color: "#52525b" },
-                      marker: {
-                        size: 6,
-                        symbol: (detect?.marks ?? []).map((s) => (s.kind === "H" ? "triangle-down" : "triangle-up")),
-                        color: (detect?.marks ?? []).map((s) => (s.pending ? "#a1a1aa" : s.kind === "H" ? "#dc2626" : "#059669")),
-                      },
-                      hovertemplate: "%{x|%Y-%m} · %{y:.1f}<extra>quiebre</extra>",
                     },
                   ]}
                   layout={{
-                    yaxis: { title: "Spread acum. (Base 100)", domain: [0, 0.72], type: logScale ? "log" : "linear" },
+                    yaxis: { title: "XLE:XLK (Base 100)", domain: [0, 0.72], type: logScale ? "log" : "linear", side: "right" },
                     yaxis2: {
-                      title: `ROC ${rocK}m`,
+                      title: `ROC(${rocK})`,
                       domain: [0.79, 1],
                       tickformat: ".0%",
                       zeroline: true,
                       zerolinecolor: "#9ca3af",
+                      side: "right",
                     },
                     xaxis: { title: "Fecha", anchor: "y" },
                     legend: { orientation: "h", y: -0.16 },
-                    bargap: 0,
+                    // Etiquetas de quiebre en cajitas (estilo StockCharts).
+                    annotations: (detect?.marks ?? []).map((s) => ({
+                      x: s.date,
+                      // En eje log, las anotaciones también van en log10 del valor.
+                      y: logScale ? Math.log10(s.value) : s.value,
+                      text: s.value.toFixed(0),
+                      showarrow: false,
+                      yshift: s.kind === "H" ? 10 : -10,
+                      font: { size: 9, color: "#111827" },
+                      bgcolor: "rgba(255,255,255,0.92)",
+                      bordercolor: s.pending ? "#a1a1aa" : s.kind === "H" ? "#dc2626" : "#059669",
+                      borderwidth: 1,
+                      borderpad: 2,
+                    })),
                     shapes: [
                       {
                         type: "line",
