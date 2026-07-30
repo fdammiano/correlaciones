@@ -367,7 +367,7 @@ export default function UniverseBuilder({
       if (!res.ok) throw new Error((await res.json()).error || res.statusText);
       const data = await res.json();
       setColumns(data.columns ?? []);
-      setSelectedCols(data.columns ?? []);
+      setSelectedCols([]); // por defecto vacío: el usuario elige cuáles
     } catch (e: any) {
       setError(e.message ?? "Error bajando dataset");
       setColumns([]);
@@ -753,7 +753,18 @@ export default function UniverseBuilder({
           {loadingDs && <div className="text-xs text-zinc-500">Bajando dataset…</div>}
           {!loadingDs && columns.length > 0 && (
             <div>
-              <label className="block text-xs text-zinc-600 mb-1">Sub-portafolios</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs text-zinc-600">
+                  Sub-portafolios <span className="text-zinc-400">({selectedCols.length}/{columns.length})</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setSelectedCols(selectedCols.length === columns.length ? [] : [...columns])}
+                  className="text-[11px] font-semibold text-brand-700 hover:text-brand-800"
+                >
+                  {selectedCols.length === columns.length ? "Ninguno" : "Todos"}
+                </button>
+              </div>
               <div className="border border-zinc-300 rounded bg-white max-h-48 overflow-y-auto">
                 {columns.map((c) => (
                   <label key={c} className="flex items-center gap-2 px-2 py-1 hover:bg-zinc-50 cursor-pointer">
