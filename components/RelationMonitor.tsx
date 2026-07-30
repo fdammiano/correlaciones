@@ -266,6 +266,13 @@ export default function RelationMonitor({
     if (!shortSel && pool[1]) setShortSel(pool[1].id);
   }, [pool, longSel, shortSel]);
 
+  // Valores efectivos: si el estado quedó vacío (la lista cargó después del
+  // montado), tomamos la primera serie disponible. Así el select y el botón
+  // siempre concuerdan con lo que se ve.
+  const effLong = longSel || pool[0]?.id || "";
+  const effShort = shortSel || pool.find((s) => s.id !== effLong)?.id || "";
+  const canAdd = !!effLong && !!effShort && effLong !== effShort;
+
   const rows = useMemo(
     () =>
       relations.map((rel) => ({
@@ -324,7 +331,7 @@ export default function RelationMonitor({
   }, [selected, zigThr, rocK]);
 
   function addRelation() {
-    const id = add(longSel, shortSel);
+    const id = add(effLong, effShort);
     if (id) setSelectedId(id);
   }
   function removeRelation(id: string) {
@@ -414,7 +421,7 @@ export default function RelationMonitor({
           <div>
             <label className="block text-[11px] text-emerald-700 font-semibold mb-1">Long</label>
             <select
-              value={longSel}
+              value={effLong}
               onChange={(e) => setLongSel(e.target.value)}
               className="border border-zinc-300 rounded px-2 py-1 bg-white min-w-[200px] max-w-[260px]"
             >
@@ -427,18 +434,18 @@ export default function RelationMonitor({
           <div>
             <label className="block text-[11px] text-red-600 font-semibold mb-1">Short</label>
             <select
-              value={shortSel}
+              value={effShort}
               onChange={(e) => setShortSel(e.target.value)}
               className="border border-zinc-300 rounded px-2 py-1 bg-white min-w-[200px] max-w-[260px]"
             >
-              {pool.filter((s) => s.id !== longSel).map((s) => (
+              {pool.filter((s) => s.id !== effLong).map((s) => (
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
           </div>
           <button
             onClick={addRelation}
-            disabled={!longSel || !shortSel || longSel === shortSel}
+            disabled={!canAdd}
             className="rounded bg-brand-700 text-white px-3 py-1.5 text-xs font-semibold hover:bg-brand-800 disabled:opacity-40"
           >
             + Agregar relación
