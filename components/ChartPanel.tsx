@@ -1629,6 +1629,10 @@ function CorrelationMonitor({
     "full",
   );
   const [matrixVal, setMatrixVal] = useState<"full" | "recent" | "delta">("full");
+  // Ventana común: calcular todas las correlaciones sobre el período donde TODOS
+  // los activos tienen dato a la vez (intersección), para que la matriz sea
+  // apples-to-apples (coincide con calcular en Excel sobre el tramo común).
+  const [commonWindow, setCommonWindow] = useState(false);
 
   // ── Tableros (pestañas) ──
   const [boards, setBoards] = useState<MonitorBoard[]>([]);
@@ -1761,6 +1765,33 @@ function CorrelationMonitor({
     [aligned, recentPeriod],
   );
 
+  // Índices donde TODOS los activos del tablero tienen dato (intersección).
+  const commonSet = useMemo(() => {
+    const arrs = series.map((s) => aligned.byId[s.id] ?? []);
+    const out = new Set<number>();
+    for (let i = 0; i < aligned.dates.length; i++) {
+      if (arrs.length > 0 && arrs.every((a) => a[i] != null)) out.add(i);
+    }
+    return out;
+  }, [aligned, series]);
+
+  // Índices efectivos: si "ventana común" está activa, restringimos a la intersección.
+  const baseIdxE = useMemo(
+    () => (commonWindow ? baseIdx.filter((i) => commonSet.has(i)) : baseIdx),
+    [baseIdx, commonSet, commonWindow],
+  );
+  const recentIdxE = useMemo(
+    () => (commonWindow ? recentIdx.filter((i) => commonSet.has(i)) : recentIdx),
+    [recentIdx, commonSet, commonWindow],
+  );
+
+  // Rango de la ventana común (para mostrarlo).
+  const commonRange = useMemo(() => {
+    const idx = Array.from(commonSet).sort((a, b) => a - b);
+    if (!idx.length) return null;
+    return { from: aligned.dates[idx[0]].slice(0, 7), to: aligned.dates[idx[idx.length - 1]].slice(0, 7), n: idx.length };
+  }, [commonSet, aligned]);
+
   // Foco por defecto: algo que parezca SPY / S&P 500; si no, la primera serie.
   const effFocus = useMemo(() => {
     if (focus && series.some((s) => s.id === focus)) return focus;
@@ -1774,11 +1805,11 @@ function CorrelationMonitor({
     a: (number | null)[],
     b: (number | null)[],
   ): { full: number | null; recent: number | null; delta: number | null; n: number } => {
-    const full = corrOver(a, b, baseIdx);
-    const recent = corrOver(a, b, recentIdx);
+    const full = corrOver(a, b, baseIdxE);
+    const recent = corrOver(a, b, recentIdxE);
     const delta = full != null && recent != null ? recent - full : null;
     let n = 0;
-    for (const i of baseIdx) if (a[i] != null && b[i] != null) n++;
+    for (const i of baseIdxE) if (a[i] != null && b[i] != null) n++;
     return { full, recent, delta, n };
   };
 
@@ -1808,7 +1839,7 @@ function CorrelationMonitor({
     });
     return rows;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aligned, effFocus, series, baseIdx, recentIdx, sortBy]);
+  }, [aligned, effFocus, series, baseIdxE, recentIdxE, sortBy]);
 
   // Matriz NxN
   const matrix = useMemo(() => {
@@ -1824,7 +1855,7 @@ function CorrelationMonitor({
     );
     return { names, z };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aligned, series, baseIdx, recentIdx, matrixVal]);
+  }, [aligned, series, baseIdxE, recentIdxE, matrixVal]);
 
   const focusName = series.find((s) => s.id === effFocus)?.name ?? "—";
   const bg = matrixVal === "delta" ? deltaBg : corrBg;
@@ -2046,6 +2077,13 @@ function CorrelationMonitor({
             bounds={bounds}
             allowAll
           />
+          <label className="flex items-center gap-1.5 text-xs text-zinc-700 cursor-pointer" title="Calcular TODAS las correlaciones sobre el período donde todos los activos tienen dato a la vez (apples-to-apples, como en Excel)">
+            <input type="checkbox" checked={commonWindow} onChange={(e) => setCommonWindow(e.target.checked)} />
+            Ventana común
+            {commonWindow && commonRange && (
+              <span className="text-[10px] text-zinc-400">({commonRange.from}→{commonRange.to} · {commonRange.n}m)</span>
+            )}
+          </label>
         </div>
 
         {series.length < 2 ? (
@@ -2134,7 +2172,7 @@ function CorrelationMonitor({
               series={series}
               aligned={aligned}
               focus={effFocus}
-              baseIdx={baseIdx}
+              baseIdx={baseIdxE}
               basePeriod={basePeriod}
             />
           </>
