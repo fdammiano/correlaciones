@@ -266,11 +266,13 @@ export default function RelationMonitor({
     if (!shortSel && pool[1]) setShortSel(pool[1].id);
   }, [pool, longSel, shortSel]);
 
-  // Valores efectivos: si el estado quedó vacío (la lista cargó después del
-  // montado), tomamos la primera serie disponible. Así el select y el botón
-  // siempre concuerdan con lo que se ve.
-  const effLong = longSel || pool[0]?.id || "";
-  const effShort = shortSel || pool.find((s) => s.id !== effLong)?.id || "";
+  // Valores efectivos: si el estado quedó vacío, con un id viejo que ya no está
+  // en la lista, o con Long == Short, autocorregimos a la primera serie válida.
+  // Así el select y el botón siempre concuerdan con lo que se ve y no se traba.
+  const inPool = (id: string) => !!id && pool.some((s) => s.id === id);
+  const effLong = (inPool(longSel) ? longSel : pool[0]?.id) || "";
+  const effShort =
+    (inPool(shortSel) && shortSel !== effLong ? shortSel : pool.find((s) => s.id !== effLong)?.id) || "";
   const canAdd = !!effLong && !!effShort && effLong !== effShort;
 
   const rows = useMemo(
@@ -385,8 +387,8 @@ export default function RelationMonitor({
               onChange={(e) => setRecentMonths(Number(e.target.value))}
               className="border border-zinc-300 rounded px-2 py-1 bg-white text-sm"
             >
-              {[3, 6, 9, 12, 18, 24].map((n) => (
-                <option key={n} value={n}>{n} meses</option>
+              {[1, 2, 3, 6, 9, 12, 18, 24].map((n) => (
+                <option key={n} value={n}>{n === 1 ? "1 mes" : `${n} meses`}</option>
               ))}
             </select>
           </div>
