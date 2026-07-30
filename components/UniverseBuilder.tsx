@@ -1275,9 +1275,11 @@ export default function UniverseBuilder({
                     <div
                       className="shrink-0 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity"
                       onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
                     >
                       <button
-                        onClick={() => onToggleHighlight(s.id)}
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onToggleHighlight(s.id); }}
                         className={isHl ? "text-amber-500" : "text-zinc-300 hover:text-amber-500"}
                         title={isHl ? "Quitar destaque" : "Destacar en el gráfico"}
                       >
@@ -1285,7 +1287,9 @@ export default function UniverseBuilder({
                       </button>
                       {(s.portfolio || s.id.startsWith("port::")) && (
                         <button
-                          onClick={() => {
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
                             setEditingPortfolioId(s.id);
                             setTab("port");
                           }}
@@ -1296,15 +1300,17 @@ export default function UniverseBuilder({
                         </button>
                       )}
                       <button
-                        onClick={() => downloadSeriesCSV(s)}
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); downloadSeriesCSV(s); }}
                         className="text-zinc-400 hover:text-zinc-900"
                         title="Descargar Excel (.xlsx)"
                       >
                         ⬇
                       </button>
                       <button
-                        onClick={() => onRemove(s.id)}
-                        className="text-zinc-400 hover:text-red-600"
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onRemove(s.id); }}
+                        className="text-zinc-400 hover:text-red-600 px-1 text-sm"
                         title={isCollection ? "Quitar de la colección" : "Borrar de la biblioteca"}
                       >
                         ✕
